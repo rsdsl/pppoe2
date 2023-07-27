@@ -8,6 +8,8 @@ pub enum Error {
     #[error("io: {0}")]
     Io(#[from] io::Error),
 
+    #[error("ppproperly: {0}")]
+    Ppproperly(#[from] ppproperly::Error),
     #[error("rsdsl_pppoe2_sys: {0}")]
     RsdslPppoe2Sys(#[from] rsdsl_pppoe2_sys::Error),
 }
