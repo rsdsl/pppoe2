@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 ppproperly = { git = "https://github.com/rsdsl/ppproperly.git", version = "0.1.0" }
+rsdsl_pppoe2_sys = { git = "https://github.com/rsdsl/pppoe2.git", version = "0.1.0" }
 thiserror = "1.0"
