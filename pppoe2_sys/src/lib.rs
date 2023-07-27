@@ -33,7 +33,7 @@ pub mod error {
 
 pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let ifname = CString::new(interface)?.into_raw();
-    let hwaddr = CString::new([0; libc::IFNAMSIZ])?.into_raw();
+    let hwaddr = CString::new([0; libc::ETH_ALEN as usize])?.into_raw();
 
     let fd = unsafe { internal::pppoe2_create_discovery_socket(ifname, hwaddr) };
 
