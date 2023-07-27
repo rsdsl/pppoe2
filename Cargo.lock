@@ -295,7 +295,7 @@ dependencies = [
 [[package]]
 name = "rsdsl_pppoe2_sys"
 version = "0.1.0"
-source = "git+https://github.com/rsdsl/pppoe2.git#f4c4320872d04e6bb403e8c0675a80c1207675a2"
+source = "git+https://github.com/rsdsl/pppoe2.git#ec6052122c0b57889d24dd28d9a662755d668fab"
 dependencies = [
  "bindgen",
  "cc",
