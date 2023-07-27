@@ -4,7 +4,6 @@ use std::path::PathBuf;
 fn main() {
     cc::Build::new()
         .flag("-Wno-address-of-packed-member")
-        .flag("-lbsd")
         .file("pppoe2/pppoe2.c")
         .compile("pppoe2");
 

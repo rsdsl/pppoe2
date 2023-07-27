@@ -1,5 +1,4 @@
 #include <arpa/inet.h>
-#include <bsd/string.h>
 #include <errno.h>
 #include <linux/if_ether.h>
 #include <linux/if_ppp.h>
@@ -30,7 +29,9 @@ int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
 	}
 
 	if (hwaddr) {
-		strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+		memset(ifr.ifr_name, 0, IFNAMSIZ);
+		strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+
 		if (ioctl(sock, SIOCGIFHWADDR, &ifr) < 0) {
 			close(sock);
 			return -1;
@@ -42,7 +43,9 @@ int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
 	sa.sll_family = AF_PACKET;
 	sa.sll_protocol = htons(ETH_P_PPP_DISC);
 
-	strlcpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	memset(ifr.ifr_name, 0, IFNAMSIZ);
+	strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+
 	if (ioctl(sock, SIOCGIFINDEX, &ifr) < 0) {
 		close(sock);
 		return -1;
