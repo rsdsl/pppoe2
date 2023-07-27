@@ -6,6 +6,9 @@ use std::os::fd::FromRawFd;
 use ppproperly::MacAddr;
 use socket2::Socket;
 
+#[allow(non_camel_case_types)]
+#[allow(non_upper_case_globals)]
+#[allow(unused)]
 mod internal {
     include!(concat!(env!("OUT_DIR"), "/pppoe2_bindings.rs"));
 }
