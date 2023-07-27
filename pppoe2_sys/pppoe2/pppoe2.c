@@ -71,14 +71,14 @@ int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
 	return sock;
 }
 
-int pppoe2_create_if_and_session_socket(const char *ifname, size_t ifnamelen, const char hwaddr[6], int sid, int *ctlfd, int *pppdevfd)
+int pppoe2_create_if_and_session_socket(const char *ifname, const char hwaddr[6], int sid, int *ctlfd, int *pppdevfd)
 {
 	struct sockaddr_pppox sp;
 
 	sp.sa_family = AF_PPPOX;
 	sp.sa_protocol = PX_PROTO_OE;
 	sp.sa_addr.pppoe.sid = sid;
-	memcpy(sp.sa_addr.pppoe.dev, ifname, ifnamelen);
+	memcpy(sp.sa_addr.pppoe.dev, ifname, strlen(ifname) + 1);
 	memcpy(sp.sa_addr.pppoe.remote, hwaddr, 6);
 
 	int sock;
