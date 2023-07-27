@@ -1,6 +1,7 @@
 pub use error::*;
 
-use std::ffi::CString;
+use std::ffi::{c_int, CString};
+use std::fs::File;
 use std::os::fd::FromRawFd;
 
 use ppproperly::MacAddr;
@@ -43,4 +44,35 @@ pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let sock = unsafe { Socket::from_raw_fd(fd) };
 
     Ok((sock, <[u8; 6]>::try_from(hwaddr.as_bytes())?.into()))
+}
+
+pub fn new_session(
+    interface: &str,
+    remote: MacAddr,
+    session_id: u16,
+) -> Result<(Socket, File, File)> {
+    let ifname = CString::new(interface)?.into_raw();
+    let hwaddr = CString::new(remote.0)?.into_raw();
+    let sid: c_int = session_id.into();
+    let mut ctlfd = c_int::default();
+    let mut pppdevfd = c_int::default();
+
+    let fd = unsafe {
+        internal::pppoe2_create_if_and_session_socket(
+            ifname,
+            hwaddr,
+            sid,
+            &mut ctlfd,
+            &mut pppdevfd,
+        )
+    };
+
+    let _ = unsafe { CString::from_raw(ifname) };
+    let _ = unsafe { CString::from_raw(hwaddr) };
+
+    let sock = unsafe { Socket::from_raw_fd(fd) };
+    let ctl = unsafe { File::from_raw_fd(ctlfd) };
+    let ppp_dev = unsafe { File::from_raw_fd(pppdevfd) };
+
+    Ok((sock, ctl, ppp_dev))
 }
