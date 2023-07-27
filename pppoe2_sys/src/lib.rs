@@ -2,6 +2,7 @@ pub use error::*;
 
 use std::ffi::{c_int, CString};
 use std::fs::File;
+use std::io;
 use std::os::fd::FromRawFd;
 
 use ppproperly::MacAddr;
@@ -41,6 +42,10 @@ pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let _ = unsafe { CString::from_raw(ifname) };
     let hwaddr = unsafe { CString::from_raw(hwaddr) };
 
+    if fd < 0 {
+        return Err(Error::Io(io::Error::last_os_error()));
+    }
+
     let sock = unsafe { Socket::from_raw_fd(fd) };
 
     Ok((sock, <[u8; 6]>::try_from(hwaddr.as_bytes())?.into()))
@@ -69,6 +74,10 @@ pub fn new_session(
 
     let _ = unsafe { CString::from_raw(ifname) };
     let _ = unsafe { CString::from_raw(hwaddr) };
+
+    if fd < 0 {
+        return Err(Error::Io(io::Error::last_os_error()));
+    }
 
     let sock = unsafe { Socket::from_raw_fd(fd) };
     let ctl = unsafe { File::from_raw_fd(ctlfd) };
