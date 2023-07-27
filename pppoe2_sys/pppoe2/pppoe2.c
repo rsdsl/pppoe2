@@ -64,7 +64,7 @@ int pppoe2_create_if_and_session_socket(const char *ifname, const char hwaddr[6]
 
 	sp.sa_family = AF_PPPOX;
 	sp.sa_protocol = PX_PROTO_OE;
-	sp.sa_addr.pppoe.sid = sid;
+	sp.sa_addr.pppoe.sid = htons(sid);
 	memcpy(sp.sa_addr.pppoe.dev, ifname, strlen(ifname) + 1);
 	memcpy(sp.sa_addr.pppoe.remote, hwaddr, 6);
 
