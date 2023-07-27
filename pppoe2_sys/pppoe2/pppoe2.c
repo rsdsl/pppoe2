@@ -18,7 +18,7 @@ int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
 	struct sockaddr_ll sa;
 
 	int sock;
-	if ((sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_PPP_DISC))) < 0) {
+	if ((sock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_PPP_DISC))) < 0) {
 		return -1;
 	}
 
