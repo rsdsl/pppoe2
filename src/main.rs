@@ -38,6 +38,8 @@ fn connect(interface: &str) -> Result<()> {
             Pppoe::Init => {
                 new_padi(local_mac).serialize(&mut sock_w)?;
                 sock_w.flush()?;
+
+                println!(" -> padi");
             }
             Pppoe::Err => {
                 return Err(recv_disc
