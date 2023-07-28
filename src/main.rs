@@ -178,7 +178,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                 *state = Pppoe::Init;
                 println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
-            _ => todo!(),
+            _ => println!(" <- [{}] unsupported pkt {:?}", pkt.src_mac, pkt),
         }
     }
 }
