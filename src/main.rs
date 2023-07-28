@@ -129,7 +129,6 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
 
                 *state.lock().expect("pppoe state mutex is poisoned") =
                     Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
-
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             PppoeData::Pads(_) => {
@@ -143,6 +142,31 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
                         pkt.src_mac, pkt.session_id
                     );
                 }
+            }
+            PppoeData::Padt(padt) => {
+                let generic_error = padt
+                    .tags
+                    .iter()
+                    .find_map(|tag| {
+                        if let PppoeVal::GenericError(generic_error) = &tag.data {
+                            Some(generic_error.to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(String::new());
+
+                let mut state = state.lock().expect("pppoe state mutex is poisoned");
+                if *state != Pppoe::Active {
+                    println!(
+                        " <- [{}] unexpected padt, error: {}",
+                        pkt.src_mac, generic_error
+                    );
+                    continue;
+                }
+
+                *state = Pppoe::Init;
+                println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
             _ => todo!(),
         }
