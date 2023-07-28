@@ -76,10 +76,7 @@ fn connect(interface: &str) -> Result<()> {
                 .serialize(&mut sock_w)?;
                 sock_w.flush()?;
 
-                println!(
-                    " -> [{}] padr {}/{}, ac cookie: {:?}",
-                    remote_mac, attempt, MAX_ATTEMPTS, ac_cookie
-                );
+                println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
                 *pppoe_state.lock().expect("pppoe state mutex is poisoned") =
                     Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
             }
@@ -126,20 +123,14 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
                 });
 
                 if *state.lock().expect("pppoe state mutex is poisoned") != Pppoe::Init {
-                    println!(
-                        " <- [{}] unexpected pado, ac: {}, ac cookie: {:?}",
-                        pkt.src_mac, ac_name, ac_cookie
-                    );
+                    println!(" <- [{}] unexpected pado, ac: {}", pkt.src_mac, ac_name);
                     continue;
                 }
 
-                println!(
-                    " <- [{}] pado, ac: {}, ac cookie: {:?}",
-                    pkt.src_mac, ac_name, ac_cookie
-                );
-
                 *state.lock().expect("pppoe state mutex is poisoned") =
                     Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
+
+                println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             _ => todo!(),
         }
