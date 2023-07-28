@@ -41,51 +41,53 @@ fn connect(interface: &str) -> Result<()> {
     );
 
     loop {
-        let mut pppoe_state = pppoe_state.lock().expect("pppoe state mutex is poisoned");
-        match *pppoe_state {
-            Pppoe::Init => {
-                PppoePkt::new_padi(
-                    local_mac,
-                    vec![
-                        PppoeVal::ServiceName("".into()).into(),
-                        PppoeVal::HostUniq(rand::random::<[u8; 16]>().into()).into(),
-                    ],
-                )
-                .serialize(&mut sock_w)?;
-                sock_w.flush()?;
-
-                println!(" -> [{}] padi", MacAddr::BROADCAST);
-            }
-            Pppoe::Requesting(remote_mac, ref ac_cookie, attempt) => {
-                if attempt >= MAX_ATTEMPTS {
-                    *pppoe_state = Pppoe::Init;
-                    continue;
-                }
-
-                PppoePkt::new_padr(
-                    remote_mac,
-                    local_mac,
-                    if let Some(ac_cookie) = ac_cookie {
+        {
+            let mut pppoe_state = pppoe_state.lock().expect("pppoe state mutex is poisoned");
+            match *pppoe_state {
+                Pppoe::Init => {
+                    PppoePkt::new_padi(
+                        local_mac,
                         vec![
                             PppoeVal::ServiceName("".into()).into(),
-                            PppoeVal::AcCookie(ac_cookie.to_owned()).into(),
-                        ]
-                    } else {
-                        vec![PppoeVal::ServiceName("".into()).into()]
-                    },
-                )
-                .serialize(&mut sock_w)?;
-                sock_w.flush()?;
+                            PppoeVal::HostUniq(rand::random::<[u8; 16]>().into()).into(),
+                        ],
+                    )
+                    .serialize(&mut sock_w)?;
+                    sock_w.flush()?;
 
-                println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
-                *pppoe_state = Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
-            }
-            Pppoe::Active => {}
-            Pppoe::Err => {
-                return Err(recv_disc
-                    .join()
-                    .expect("recv_discovery panic")
-                    .expect_err("Pppoe::Err state entered without an error"));
+                    println!(" -> [{}] padi", MacAddr::BROADCAST);
+                }
+                Pppoe::Requesting(remote_mac, ref ac_cookie, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *pppoe_state = Pppoe::Init;
+                        continue;
+                    }
+
+                    PppoePkt::new_padr(
+                        remote_mac,
+                        local_mac,
+                        if let Some(ac_cookie) = ac_cookie {
+                            vec![
+                                PppoeVal::ServiceName("".into()).into(),
+                                PppoeVal::AcCookie(ac_cookie.to_owned()).into(),
+                            ]
+                        } else {
+                            vec![PppoeVal::ServiceName("".into()).into()]
+                        },
+                    )
+                    .serialize(&mut sock_w)?;
+                    sock_w.flush()?;
+
+                    println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
+                    *pppoe_state = Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
+                }
+                Pppoe::Active => {}
+                Pppoe::Err => {
+                    return Err(recv_disc
+                        .join()
+                        .expect("recv_discovery panic")
+                        .expect_err("Pppoe::Err state entered without an error"));
+                }
             }
         }
 
