@@ -4,7 +4,7 @@ use ppproperly::MacAddr;
 pub enum Pppoe {
     Init,
     Requesting(MacAddr, Option<Vec<u8>>, usize),
-    Active,
+    Active(MacAddr),
     Err,
 }
 

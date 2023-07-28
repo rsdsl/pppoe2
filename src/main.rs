@@ -83,7 +83,7 @@ fn connect(interface: &str) -> Result<()> {
                     println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
                     *pppoe_state = Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
                 }
-                Pppoe::Active => {}
+                Pppoe::Active(_) => {}
                 Pppoe::Err => {
                     return Err(recv_disc
                         .join()
@@ -103,6 +103,22 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
     loop {
         let mut pkt = PppoePkt::default();
         pkt.deserialize(&mut sock_r)?;
+
+        match *state.lock().expect("pppoe state mutex is poisoned") {
+            Pppoe::Requesting(remote_mac, _, _) => {
+                if pkt.src_mac != remote_mac {
+                    println!(" <- [{}] unexpected mac, pkt: {:?}", pkt.src_mac, pkt);
+                    continue;
+                }
+            }
+            Pppoe::Active(remote_mac) => {
+                if pkt.src_mac != remote_mac {
+                    println!(" <- [{}] unexpected mac, pkt: {:?}", pkt.src_mac, pkt);
+                    continue;
+                }
+            }
+            _ => {}
+        }
 
         match pkt.data {
             PppoeData::Pado(pado) => {
@@ -144,7 +160,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                     // TODO: launch recv thread and state looper (LCP and NCP initiator)
                     todo!();
 
-                    *state = Pppoe::Active;
+                    *state = Pppoe::Active(pkt.src_mac);
                     println!(" <- [{}] pads, session id: {}", pkt.src_mac, pkt.session_id);
                 } else {
                     println!(
@@ -167,16 +183,15 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                     .unwrap_or(String::new());
 
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
-                if *state != Pppoe::Active {
+                if let Pppoe::Active(_) = *state {
+                    *state = Pppoe::Init;
+                    println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
+                } else {
                     println!(
                         " <- [{}] unexpected padt, error: {}",
                         pkt.src_mac, generic_error
                     );
-                    continue;
                 }
-
-                *state = Pppoe::Init;
-                println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
             _ => println!(" <- [{}] unsupported pkt {:?}", pkt.src_mac, pkt),
         }
