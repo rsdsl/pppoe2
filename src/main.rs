@@ -202,12 +202,12 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
 }
 
 fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
-    let (_sock_sess, _ctl, ppp) = new_session(interface, remote_mac, session_id)?;
+    let (_sock_sess, ctl, ppp) = new_session(interface, remote_mac, session_id)?;
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
     let ppp_state2 = ppp_state.clone();
-    let recv_sess = thread::spawn(move || match recv_session(ppp, ppp_state2.clone()) {
+    let recv_sess = thread::spawn(move || match recv_session(ctl, ppp, ppp_state2.clone()) {
         Ok(_) => Ok(()),
         Err(e) => {
             *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -232,13 +232,13 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
     }
 }
 
-fn recv_session(sock: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
-    let mut sock_r = BufReader::with_capacity(1500, sock);
+fn recv_session(ctl: File, _ppp: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    let mut ctl_r = BufReader::with_capacity(1500, ctl);
 
     loop {
         let mut pkt = PppPkt::default();
-        pkt.deserialize(&mut sock_r)?;
+        pkt.deserialize(&mut ctl_r).unwrap();
 
-        println!(" <- ppp {:?}", pkt);
+        println!(" <- ppp lcp {:?}", pkt);
     }
 }
