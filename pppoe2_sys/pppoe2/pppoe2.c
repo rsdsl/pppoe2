@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/if_ether.h>
 #include <linux/if_ppp.h>
 #include <linux/if_pppox.h>
