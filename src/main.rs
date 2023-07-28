@@ -59,7 +59,7 @@ fn connect(interface: &str) -> Result<()> {
 
                     println!(" -> [{}] padi", MacAddr::BROADCAST);
                 }
-                Pppoe::Requesting(remote_mac, ref ac_cookie, attempt) => {
+                Pppoe::Request(remote_mac, ref ac_cookie, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
                         *pppoe_state = Pppoe::Init;
                         continue;
@@ -81,7 +81,7 @@ fn connect(interface: &str) -> Result<()> {
                     sock_w.flush()?;
 
                     println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
-                    *pppoe_state = Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
+                    *pppoe_state = Pppoe::Request(remote_mac, ac_cookie.to_owned(), attempt + 1);
                 }
                 Pppoe::Active(_) => {}
                 Pppoe::Err => {
@@ -105,7 +105,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
         pkt.deserialize(&mut sock_r)?;
 
         match *state.lock().expect("pppoe state mutex is poisoned") {
-            Pppoe::Requesting(remote_mac, _, _) => {
+            Pppoe::Request(remote_mac, _, _) => {
                 if pkt.src_mac != remote_mac {
                     println!(" <- [{}] unexpected mac, pkt: {:?}", pkt.src_mac, pkt);
                     continue;
@@ -148,12 +148,12 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                     continue;
                 }
 
-                *state = Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
+                *state = Pppoe::Request(pkt.src_mac, ac_cookie, 0);
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             PppoeData::Pads(_) => {
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
-                if let Pppoe::Requesting(_, _, _) = *state {
+                if let Pppoe::Request(_, _, _) = *state {
                     let (sock_sess, _ctl, _ppp) =
                         new_session(interface, pkt.src_mac, pkt.session_id)?;
 
