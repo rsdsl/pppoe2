@@ -1,8 +1,10 @@
+use ppproperly::MacAddr;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Pppoe {
     Init,
-    Requesting,
-    Active(u16),
+    Requesting(MacAddr, Option<Vec<u8>>, usize),
+    Active(MacAddr, u16),
     Err,
 }
 
