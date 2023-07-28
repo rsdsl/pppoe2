@@ -35,7 +35,7 @@ pub mod error {
 
 pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let ifname = CString::new(interface)?.into_raw();
-    let hwaddr = vec![0; libc::ETH_ALEN as usize - 1];
+    let hwaddr = vec![0; libc::ETH_ALEN as usize];
 
     let fd = unsafe { internal::pppoe2_create_discovery_socket(ifname, hwaddr[0] as *mut i8) };
 
