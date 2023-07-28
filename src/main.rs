@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use ppproperly::{Deserialize, MacAddr, PppoeData, PppoePkt, PppoeVal, Serialize};
+use ppproperly::{Deserialize, MacAddr, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize};
 use rsdsl_netlinkd::link;
-use rsdsl_pppoe2::{Pppoe, Result};
+use rsdsl_pppoe2::{Ppp, Pppoe, Result};
 use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
 use socket2::Socket;
 
@@ -154,11 +154,13 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
             PppoeData::Pads(_) => {
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
                 if let Pppoe::Request(_, _, _) = *state {
-                    let (sock_sess, _ctl, _ppp) =
-                        new_session(interface, pkt.src_mac, pkt.session_id)?;
-
-                    // TODO: launch recv thread and state looper (LCP and NCP initiator)
-                    todo!();
+                    let interface2 = interface.to_owned();
+                    thread::spawn(move || {
+                        match session(&interface2, pkt.src_mac, pkt.session_id) {
+                            Ok(_) => {}
+                            Err(e) => eprintln!("{}", e),
+                        }
+                    });
 
                     *state = Pppoe::Active(pkt.src_mac);
                     println!(" <- [{}] pads, session id: {}", pkt.src_mac, pkt.session_id);
@@ -195,5 +197,47 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
             }
             _ => println!(" <- [{}] unsupported pkt {:?}", pkt.src_mac, pkt),
         }
+    }
+}
+
+fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
+    let (sock_sess, _ctl, _ppp) = new_session(interface, remote_mac, session_id)?;
+
+    let ppp_state = Arc::new(Mutex::new(Ppp::default()));
+
+    let ppp_state2 = ppp_state.clone();
+    let recv_sess = thread::spawn(move || match recv_session(sock_sess, ppp_state2.clone()) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
+            Err(e)
+        }
+    });
+
+    loop {
+        let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
+        match *ppp_state {
+            Ppp::Synchronize => {}
+            Ppp::Active => {}
+            Ppp::Err => {
+                return Err(recv_sess
+                    .join()
+                    .expect("recv_session panic")
+                    .expect_err("Ppp::Err state entered without an error"));
+            }
+        }
+
+        thread::sleep(PPPOE_XMIT_INTERVAL);
+    }
+}
+
+fn recv_session(sock: Socket, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    let mut sock_r = BufReader::with_capacity(1500, sock);
+
+    loop {
+        let mut pkt = PppPkt::default();
+        pkt.deserialize(&mut sock_r)?;
+
+        println!(" <- ppp {:?}", pkt);
     }
 }

@@ -18,6 +18,7 @@ impl Default for Pppoe {
 pub enum Ppp {
     Synchronize,
     Active,
+    Err,
 }
 
 impl Default for Ppp {
