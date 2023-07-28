@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -60,10 +60,12 @@ fn connect(interface: &str) -> Result<()> {
     }
 }
 
-fn recv_discovery(mut sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
+fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
+    let mut sock_r = BufReader::with_capacity(1500, sock);
+
     loop {
         let mut pkt = PppoePkt::default();
-        pkt.deserialize(&mut sock)?;
+        pkt.deserialize(&mut sock_r)?;
 
         println!("{:?}", pkt);
     }
