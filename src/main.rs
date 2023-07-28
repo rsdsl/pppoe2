@@ -43,7 +43,14 @@ fn connect(interface: &str) -> Result<()> {
     loop {
         match *pppoe_state.lock().expect("pppoe state mutex is poisoned") {
             Pppoe::Init => {
-                new_padi(local_mac).serialize(&mut sock_w)?;
+                PppoePkt::new_padi(
+                    local_mac,
+                    vec![
+                        PppoeVal::ServiceName("".into()).into(),
+                        PppoeVal::HostUniq(rand::random::<[u8; 16]>().into()).into(),
+                    ],
+                )
+                .serialize(&mut sock_w)?;
                 sock_w.flush()?;
 
                 println!(" -> {:?} padi", MacAddr::BROADCAST);
@@ -137,14 +144,4 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
             _ => todo!(),
         }
     }
-}
-
-fn new_padi(local_mac: MacAddr) -> PppoePkt {
-    PppoePkt::new_padi(
-        local_mac,
-        vec![
-            PppoeVal::ServiceName("".into()).into(),
-            PppoeVal::HostUniq(rand::random::<[u8; 16]>().into()).into(),
-        ],
-    )
 }
