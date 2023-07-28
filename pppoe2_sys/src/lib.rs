@@ -49,7 +49,6 @@ pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
 
     let sock = unsafe { Socket::from_raw_fd(fd) };
 
-    println!("dbg hwaddr {:?}", hwaddr.as_bytes());
     Ok((sock, <[u8; 6]>::try_from(hwaddr.as_bytes())?.into()))
 }
 
