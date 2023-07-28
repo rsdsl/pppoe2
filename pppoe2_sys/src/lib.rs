@@ -1,6 +1,6 @@
 pub use error::*;
 
-use std::ffi::{c_int, CString};
+use std::ffi::{c_int, CStr, CString};
 use std::fs::File;
 use std::io;
 use std::os::fd::FromRawFd;
@@ -41,7 +41,8 @@ pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let fd = unsafe { internal::pppoe2_create_discovery_socket(ifname, hwaddr) };
 
     let _ = unsafe { CString::from_raw(ifname) };
-    let hwaddr = unsafe { CString::from_raw(hwaddr) };
+    let hwaddr_mod = unsafe { CStr::from_ptr(hwaddr) };
+    let _ = unsafe { CString::from_raw(hwaddr) };
 
     if fd < 0 {
         return Err(Error::Io(io::Error::last_os_error()));
@@ -49,7 +50,7 @@ pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
 
     let sock = unsafe { Socket::from_raw_fd(fd) };
 
-    Ok((sock, <[u8; 6]>::try_from(hwaddr.as_bytes())?.into()))
+    Ok((sock, <[u8; 6]>::try_from(hwaddr_mod.to_bytes())?.into()))
 }
 
 pub fn new_session(
