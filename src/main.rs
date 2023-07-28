@@ -41,7 +41,8 @@ fn connect(interface: &str) -> Result<()> {
     );
 
     loop {
-        match *pppoe_state.lock().expect("pppoe state mutex is poisoned") {
+        let mut pppoe_state = pppoe_state.lock().expect("pppoe state mutex is poisoned");
+        match *pppoe_state {
             Pppoe::Init => {
                 PppoePkt::new_padi(
                     local_mac,
@@ -57,7 +58,7 @@ fn connect(interface: &str) -> Result<()> {
             }
             Pppoe::Requesting(remote_mac, ref ac_cookie, attempt) => {
                 if attempt >= MAX_ATTEMPTS {
-                    *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
+                    *pppoe_state = Pppoe::Init;
                     continue;
                 }
 
@@ -77,8 +78,7 @@ fn connect(interface: &str) -> Result<()> {
                 sock_w.flush()?;
 
                 println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
-                *pppoe_state.lock().expect("pppoe state mutex is poisoned") =
-                    Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
+                *pppoe_state = Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
             }
             Pppoe::Active => {}
             Pppoe::Err => {
