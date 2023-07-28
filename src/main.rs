@@ -18,8 +18,10 @@ fn main() -> Result<()> {
     println!("wait for up {}", PPPOE_UPLINK);
 
     link::wait_up(PPPOE_UPLINK.into())?;
-    connect(PPPOE_UPLINK)?;
 
+    let connect_handle = thread::spawn(|| connect(PPPOE_UPLINK));
+
+    connect_handle.join().expect("connect panic")?;
     Ok(())
 }
 
