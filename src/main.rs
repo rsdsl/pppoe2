@@ -122,13 +122,13 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
                     }
                 });
 
-                if *state.lock().expect("pppoe state mutex is poisoned") != Pppoe::Init {
+                let mut state = state.lock().expect("pppoe state mutex is poisoned");
+                if *state != Pppoe::Init {
                     println!(" <- [{}] unexpected pado, ac: {}", pkt.src_mac, ac_name);
                     continue;
                 }
 
-                *state.lock().expect("pppoe state mutex is poisoned") =
-                    Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
+                *state = Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             PppoeData::Pads(_) => {
