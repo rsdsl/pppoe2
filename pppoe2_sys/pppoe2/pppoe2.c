@@ -94,7 +94,7 @@ int pppoe2_create_if_and_session_socket(const char *ifname, const unsigned char 
 		return -1;
 	}
 
-	fcntl(*ctlfd, F_SETFD, FD_CLOEXEC);
+	// TODO: FD_CLOEXEC
 
 	if (ioctl(*ctlfd, PPPIOCATTCHAN, &chindex) < 0) {
 		close(*ctlfd);
@@ -103,24 +103,9 @@ int pppoe2_create_if_and_session_socket(const char *ifname, const unsigned char 
 		return -1;
 	}
 
-	int flags = fcntl(*ctlfd, F_GETFL);
-	if (flags == -1 || fcntl(*ctlfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-		close(*ctlfd);
-		close(sock);
-
-		return -1;
-	}
+	// nonblock shouldn't be needed here
 
 	if ((*pppdevfd = open("/dev/ppp", O_RDWR)) < 0) {
-		close(*ctlfd);
-		close(sock);
-
-		return -1;
-	}
-
-	flags = fcntl(*pppdevfd, F_GETFL);
-	if (flags == -1 || fcntl(*pppdevfd, F_SETFL, flags | O_NONBLOCK) == -1) {
-		close(*pppdevfd);
 		close(*ctlfd);
 		close(sock);
 
