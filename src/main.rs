@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -201,12 +202,12 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
 }
 
 fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
-    let (sock_sess, _ctl, _ppp) = new_session(interface, remote_mac, session_id)?;
+    let (_sock_sess, _ctl, ppp) = new_session(interface, remote_mac, session_id)?;
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
     let ppp_state2 = ppp_state.clone();
-    let recv_sess = thread::spawn(move || match recv_session(sock_sess, ppp_state2.clone()) {
+    let recv_sess = thread::spawn(move || match recv_session(ppp, ppp_state2.clone()) {
         Ok(_) => Ok(()),
         Err(e) => {
             *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -231,7 +232,7 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
     }
 }
 
-fn recv_session(sock: Socket, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn recv_session(sock: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut sock_r = BufReader::with_capacity(1500, sock);
 
     loop {
