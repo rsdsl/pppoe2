@@ -14,7 +14,7 @@
 
 #include "pppoe2.h"
 
-int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
+int pppoe2_create_discovery_socket(const char *ifname, unsigned char *hwaddr)
 {
 	struct ifreq ifr;
 	struct sockaddr_ll sa;
@@ -63,7 +63,7 @@ int pppoe2_create_discovery_socket(const char *ifname, char *hwaddr)
 	return sock;
 }
 
-int pppoe2_create_if_and_session_socket(const char *ifname, const char hwaddr[6], int sid, int *ctlfd, int *pppdevfd)
+int pppoe2_create_if_and_session_socket(const char *ifname, const unsigned char hwaddr[6], int sid, int *ctlfd, int *pppdevfd)
 {
 	struct sockaddr_pppox sp;
 

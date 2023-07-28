@@ -35,9 +35,9 @@ pub mod error {
 
 pub fn new_discovery_socket(interface: &str) -> Result<(Socket, MacAddr)> {
     let ifname = CString::new(interface)?.into_raw();
-    let hwaddr = vec![0; libc::ETH_ALEN as usize];
+    let mut hwaddr = vec![0; libc::ETH_ALEN as usize];
 
-    let fd = unsafe { internal::pppoe2_create_discovery_socket(ifname, hwaddr[0] as *mut i8) };
+    let fd = unsafe { internal::pppoe2_create_discovery_socket(ifname, &mut hwaddr[0] as *mut u8) };
 
     let _ = unsafe { CString::from_raw(ifname) };
 
@@ -56,7 +56,6 @@ pub fn new_session(
     session_id: u16,
 ) -> Result<(Socket, File, File)> {
     let ifname = CString::new(interface)?.into_raw();
-    let hwaddr = CString::new(remote.0)?.into_raw();
     let sid: c_int = session_id.into();
     let mut ctlfd = c_int::default();
     let mut pppdevfd = c_int::default();
@@ -64,7 +63,7 @@ pub fn new_session(
     let fd = unsafe {
         internal::pppoe2_create_if_and_session_socket(
             ifname,
-            hwaddr,
+            &remote.0[0] as *const u8,
             sid,
             &mut ctlfd,
             &mut pppdevfd,
@@ -72,7 +71,6 @@ pub fn new_session(
     };
 
     let _ = unsafe { CString::from_raw(ifname) };
-    let _ = unsafe { CString::from_raw(hwaddr) };
 
     if fd < 0 {
         return Err(Error::Io(io::Error::last_os_error()));
