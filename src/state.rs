@@ -3,6 +3,7 @@ pub enum Pppoe {
     Init,
     Requesting,
     Active(u16),
+    Err,
 }
 
 impl Default for Pppoe {

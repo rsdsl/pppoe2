@@ -338,6 +338,7 @@ dependencies = [
  "ppproperly",
  "rand",
  "rsdsl_pppoe2_sys",
+ "socket2",
  "thiserror",
 ]
 
