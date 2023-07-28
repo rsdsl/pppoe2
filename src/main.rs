@@ -46,7 +46,7 @@ fn connect(interface: &str) -> Result<()> {
                 new_padi(local_mac).serialize(&mut sock_w)?;
                 sock_w.flush()?;
 
-                println!(" -> padi");
+                println!(" -> {:?} padi", MacAddr::BROADCAST);
             }
             Pppoe::Requesting(remote_mac, ref ac_cookie, attempt) => {
                 if attempt >= MAX_ATTEMPTS {
