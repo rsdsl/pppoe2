@@ -80,13 +80,13 @@ fn connect(interface: &str) -> Result<()> {
                 *pppoe_state.lock().expect("pppoe state mutex is poisoned") =
                     Pppoe::Requesting(remote_mac, ac_cookie.to_owned(), attempt + 1);
             }
+            Pppoe::Active => {}
             Pppoe::Err => {
                 return Err(recv_disc
                     .join()
                     .expect("recv_discovery panic")
                     .expect_err("Pppoe::Err state entered without an error"));
             }
-            _ => todo!(),
         }
 
         thread::sleep(PPPOE_XMIT_INTERVAL);
@@ -131,6 +131,18 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
                     Pppoe::Requesting(pkt.src_mac, ac_cookie, 0);
 
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
+            }
+            PppoeData::Pads(_) => {
+                let mut state = state.lock().expect("pppoe state mutex is poisoned");
+                if let Pppoe::Requesting(_, _, _) = *state {
+                    *state = Pppoe::Active;
+                    println!(" <- [{}] pads, session id: {}", pkt.src_mac, pkt.session_id);
+                } else {
+                    println!(
+                        " <- [{}] unexpected pads, session id: {}",
+                        pkt.src_mac, pkt.session_id
+                    );
+                }
             }
             _ => todo!(),
         }
