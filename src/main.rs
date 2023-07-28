@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use ppproperly::{Deserialize, MacAddr, PppoePkt, PppoeVal, Serialize};
+use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Pppoe, Result};
 use rsdsl_pppoe2_sys::new_discovery_socket;
 use socket2::Socket;
@@ -13,7 +14,11 @@ const PPPOE_UPLINK: &str = "eth1";
 static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(8);
 
 fn main() -> Result<()> {
+    println!("wait for up {}", PPPOE_UPLINK);
+
+    link::wait_up(PPPOE_UPLINK.into())?;
     connect(PPPOE_UPLINK)?;
+
     Ok(())
 }
 

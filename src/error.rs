@@ -10,6 +10,8 @@ pub enum Error {
 
     #[error("ppproperly: {0}")]
     Ppproperly(#[from] ppproperly::Error),
+    #[error("rsdsl_netlinkd: {0}")]
+    RsdslNetlinkd(#[from] rsdsl_netlinkd::error::Error),
     #[error("rsdsl_pppoe2_sys: {0}")]
     RsdslPppoe2Sys(#[from] rsdsl_pppoe2_sys::Error),
 }
