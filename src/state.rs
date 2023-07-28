@@ -13,3 +13,15 @@ impl Default for Pppoe {
         Self::Init
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Ppp {
+    Synchronize,
+    Active,
+}
+
+impl Default for Ppp {
+    fn default() -> Self {
+        Self::Synchronize
+    }
+}
