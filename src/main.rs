@@ -1,4 +1,3 @@
-use std::env;
 use std::io::{BufWriter, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -9,10 +8,12 @@ use rsdsl_pppoe2::{Pppoe, Result};
 use rsdsl_pppoe2_sys::new_discovery_socket;
 use socket2::Socket;
 
+const PPPOE_UPLINK: &str = "eth1";
+
 static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(8);
 
 fn main() -> Result<()> {
-    connect(&env::args().nth(1).expect("usage: rsdsl_pppoe2 <interface>"))?;
+    connect(PPPOE_UPLINK)?;
     Ok(())
 }
 
