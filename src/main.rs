@@ -6,7 +6,7 @@ use std::time::Duration;
 use ppproperly::{Deserialize, MacAddr, PppoeData, PppoePkt, PppoeVal, Serialize};
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Pppoe, Result};
-use rsdsl_pppoe2_sys::new_discovery_socket;
+use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
 use socket2::Socket;
 
 const PPPOE_UPLINK: &str = "eth1";
@@ -29,16 +29,18 @@ fn connect(interface: &str) -> Result<()> {
 
     let pppoe_state = Arc::new(Mutex::new(Pppoe::default()));
 
+    let interface2 = interface.to_owned();
     let pppoe_state2 = pppoe_state.clone();
-    let recv_disc = thread::spawn(
-        move || match recv_discovery(sock_disc, pppoe_state2.clone()) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                *pppoe_state2.lock().expect("pppoe state mutex is poisoned") = Pppoe::Err;
-                Err(e)
-            }
-        },
-    );
+    let recv_disc =
+        thread::spawn(
+            move || match recv_discovery(&interface2, sock_disc, pppoe_state2.clone()) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    *pppoe_state2.lock().expect("pppoe state mutex is poisoned") = Pppoe::Err;
+                    Err(e)
+                }
+            },
+        );
 
     loop {
         {
@@ -95,7 +97,7 @@ fn connect(interface: &str) -> Result<()> {
     }
 }
 
-fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
+fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
     let mut sock_r = BufReader::with_capacity(1500, sock);
 
     loop {
@@ -136,6 +138,12 @@ fn recv_discovery(sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
             PppoeData::Pads(_) => {
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
                 if let Pppoe::Requesting(_, _, _) = *state {
+                    let (sock_sess, _ctl, _ppp) =
+                        new_session(interface, pkt.src_mac, pkt.session_id)?;
+
+                    // TODO: launch recv thread and state looper (LCP and NCP initiator)
+                    todo!();
+
                     *state = Pppoe::Active;
                     println!(" <- [{}] pads, session id: {}", pkt.src_mac, pkt.session_id);
                 } else {
