@@ -1069,7 +1069,7 @@ fn ipv6cp(
     {
         let mut config = config.lock().expect("ipv6 config mutex is poisoned");
 
-        config.laddr = Ipv6Addr::UNSPECIFIED;
+        config.laddr = ll(rand::random());
         config.raddr = Ipv6Addr::UNSPECIFIED;
     }
 
