@@ -1,15 +1,19 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use ppproperly::{
-    AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr,
-    PapData, PapPkt, PppData, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
+    AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, IpcpData, IpcpOpt, IpcpPkt,
+    Ipv6cpData, Ipv6cpOpt, Ipv6cpPkt, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData,
+    PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
 };
+use rsdsl_ip_config::{Ipv4Config, Ipv6Config};
 use rsdsl_netlinkd::link;
-use rsdsl_pppoe2::{Ppp, Pppoe, Result};
+use rsdsl_pppoe2::{Ncp, Ppp, Pppoe, Result};
 use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
 use socket2::Socket;
 
@@ -22,6 +26,12 @@ const MAX_STATUS_ATTEMPTS: usize = 2;
 
 static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(3);
 static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum Network {
+    Ipv4,
+    Ipv6,
+}
 
 fn main() -> Result<()> {
     println!("wait for up {}", PPPOE_UPLINK);
@@ -233,7 +243,7 @@ fn recv_discovery(
 
                 println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
-            _ => println!(" <- [{}] unsupported pkt {:?}", pkt.src_mac, pkt),
+            _ => println!(" <- [{}] unsupported pppoe pkt {:?}", pkt.src_mac, pkt),
         }
     }
 }
@@ -253,12 +263,30 @@ fn session(
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
+    let ncp_states = Arc::new(Mutex::new(HashMap::new()));
+
+    {
+        let mut ncps = ncp_states.lock().expect("ncp state mutex is poisoned");
+
+        ncps.insert(Network::Ipv4, Ncp::default());
+        ncps.insert(Network::Ipv6, Ncp::default());
+    }
+
+    let config4 = Arc::new(Mutex::new(Ipv4Config::default()));
+    let config6 = Arc::new(Mutex::new(Ipv6Config::default()));
+
+    let ctl2 = ctl.try_clone()?;
     let ppp_state2 = ppp_state.clone();
-    let recv_sess = thread::spawn(move || match recv_session(ctl, ppp_state2.clone()) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
-            Err(e)
+    let ncp_states2 = ncp_states.clone();
+    let config42 = config4.clone();
+    let config62 = config6.clone();
+    let recv_sess = thread::spawn(move || {
+        match recv_session(ctl2, ppp_state2.clone(), ncp_states2, config42, config62) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
+                Err(e)
+            }
         }
     });
 
@@ -324,6 +352,7 @@ fn session(
                 }
                 Ppp::SyncAcked(attempt) => {
                     // Packet handler takes care of the rest.
+
                     if attempt >= MAX_ATTEMPTS {
                         *ppp_state = Ppp::Terminate2(
                             "Maximum number of Configure-Ack attempts exceeded".into(),
@@ -361,7 +390,39 @@ fn session(
 
                     *ppp_state = Ppp::Auth(auth_proto.clone(), attempt + 1);
                 }
-                Ppp::Active => {}
+                Ppp::Active => {
+                    let mut ncps = ncp_states.lock().expect("ncp state mutex is poisoned");
+                    for (ncp, state) in ncps.iter_mut() {
+                        if *state == Ncp::Dead {
+                            *state = Ncp::Configure(rand::random(), 0);
+
+                            let ctl2 = ctl.try_clone()?;
+                            let ncp_states2 = ncp_states.clone();
+                            let config42 = config4.clone();
+                            let config62 = config6.clone();
+                            match *ncp {
+                                Network::Ipv4 => {
+                                    thread::spawn(|| match ipcp(ctl2, ncp_states2, config42) {
+                                        Ok(_) => Ok(()),
+                                        Err(e) => {
+                                            eprintln!("{}", e);
+                                            Err(e)
+                                        }
+                                    })
+                                }
+                                Network::Ipv6 => {
+                                    thread::spawn(|| match ipv6cp(ctl2, ncp_states2, config62) {
+                                        Ok(_) => Ok(()),
+                                        Err(e) => {
+                                            eprintln!("{}", e);
+                                            Err(e)
+                                        }
+                                    })
+                                }
+                            };
+                        }
+                    }
+                }
                 Ppp::Terminate(ref reason, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
                         *ppp_state = Ppp::Terminate2(
@@ -424,7 +485,13 @@ fn session(
     Ok(())
 }
 
-fn recv_session(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn recv_session(
+    ctl: File,
+    state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config4: Arc<Mutex<Ipv4Config>>,
+    config6: Arc<Mutex<Ipv6Config>>,
+) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
     let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
@@ -442,7 +509,21 @@ fn recv_session(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
             PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
             PppData::Pap(pap) => handle_pap(pap, state.clone())?,
             PppData::Chap(chap) => handle_chap(chap, &mut ctl_w, state.clone())?,
-            _ => println!(" <- unhandled ppp {:?}", ppp),
+            PppData::Ipcp(ipcp) => handle_ipcp(
+                ipcp,
+                &mut ctl_w,
+                state.clone(),
+                ncp_states.clone(),
+                config4.clone(),
+            )?,
+            PppData::Ipv6cp(ipv6cp) => handle_ipv6cp(
+                ipv6cp,
+                &mut ctl_w,
+                state.clone(),
+                ncp_states.clone(),
+                config6.clone(),
+            )?,
+            _ => println!(" <- unsupported ppp pkt {:?}", ppp),
         }
     }
 
@@ -561,7 +642,7 @@ fn handle_lcp(
                         None
                     }
                 })
-                .expect("receive configure-ack without magic number");
+                .expect("receive lcp configure-ack without magic number");
 
             let mut state = state.lock().expect("ppp state mutex is poisoned");
             match *state {
@@ -847,4 +928,285 @@ fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>
             Ok(())
         }
     }
+}
+
+fn ipcp(
+    ctl: File,
+    states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config: Arc<Mutex<Ipv4Config>>,
+) -> Result<()> {
+    let mut ctl_w = BufWriter::with_capacity(1500, ctl);
+
+    {
+        let mut config = config.lock().expect("ipv4 config mutex is poisoned");
+
+        config.addr = Ipv4Addr::UNSPECIFIED;
+        config.dns1 = Ipv4Addr::UNSPECIFIED;
+        config.dns2 = Ipv4Addr::UNSPECIFIED;
+    }
+
+    loop {
+        {
+            let config = config.lock().expect("ipv4 config mutex is poisoned");
+
+            let mut states = states.lock().expect("ncp state mutex is poisoned");
+            match states[&Network::Ipv4] {
+                Ncp::Dead => {}
+                Ncp::Configure(identifier, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv4).expect("no ipv4 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    PppPkt::new_ipcp(IpcpPkt::new_configure_request(
+                        identifier,
+                        vec![IpcpOpt::IpAddr(config.addr.into()).into()],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    *states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
+                        Ncp::Configure(identifier, attempt + 1);
+
+                    println!(" -> ipcp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                }
+                Ncp::ConfAck(identifier, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv4).expect("no ipv4 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    PppPkt::new_ipcp(IpcpPkt::new_configure_request(
+                        identifier,
+                        vec![IpcpOpt::IpAddr(config.addr.into()).into()],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    *states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
+                        Ncp::ConfAck(identifier, attempt + 1);
+
+                    println!(" -> ipcp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                }
+                Ncp::ConfAcked(attempt) => {
+                    // Packet handler takes care of the rest.
+
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv4).expect("no ipv4 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    *states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
+                        Ncp::ConfAcked(attempt + 1);
+                }
+                Ncp::Active => {}
+                Ncp::Failed => {}
+            }
+        }
+
+        thread::sleep(PPPOE_XMIT_INTERVAL);
+    }
+}
+
+fn ipv6cp(
+    ctl: File,
+    states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config: Arc<Mutex<Ipv6Config>>,
+) -> Result<()> {
+    Ok(())
+}
+
+fn handle_ipcp(
+    ipcp: IpcpPkt,
+    ctl_w: &mut BufWriter<File>,
+    state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config: Arc<Mutex<Ipv4Config>>,
+) -> Result<()> {
+    if *state.lock().expect("ppp state mutex is poisoned") != Ppp::Active {
+        println!(" <- unexpected ipcp");
+        return Ok(());
+    }
+
+    match ipcp.data {
+        IpcpData::ConfigureRequest(configure_request) => {
+            let compression = configure_request.options.iter().find_map(|opt| {
+                if let IpcpOpt::IpCompressionProtocol(compression) = &opt.value {
+                    Some(compression)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(compression) = compression {
+                PppPkt::new_ipcp(IpcpPkt::new_configure_reject(
+                    ipcp.identifier,
+                    vec![IpcpOpt::IpCompressionProtocol(compression.clone()).into()],
+                ))
+                .serialize(ctl_w)?;
+                ctl_w.flush()?;
+
+                println!(
+                    " -> ipcp configure-reject {}, compression: {:?} -> None",
+                    ipcp.identifier, compression
+                );
+                return Ok(());
+            }
+
+            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv4] {
+                Ncp::Configure(identifier, attempt) => {
+                    *ncp_states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
+                        Ncp::ConfAck(identifier, attempt)
+                }
+                Ncp::ConfAck(..) => {} // Simply retransmit our previous ack.
+                Ncp::ConfAcked(..) => {
+                    *ncp_states.get_mut(&Network::Ipv4).expect("no ipv4 state") = Ncp::Active
+                }
+                _ => {
+                    println!(" <- unexpected ipcp configure-request {}", ipcp.identifier);
+                    return Ok(());
+                }
+            }
+
+            PppPkt::new_ipcp(IpcpPkt::new_configure_ack(
+                ipcp.identifier,
+                configure_request.options,
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            println!(" <- ipcp configure-request {}", ipcp.identifier);
+            println!(" -> ipcp configure-ack {}", ipcp.identifier);
+
+            Ok(())
+        }
+        IpcpData::ConfigureAck(configure_ack) => {
+            let addr = configure_ack
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let IpcpOpt::IpAddr(addr) = &opt.value {
+                        Some(addr.0)
+                    } else {
+                        None
+                    }
+                })
+                .expect("receive ipcp configure-ack without ipv4 address");
+
+            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv4] {
+                Ncp::Configure(identifier, attempt) if ipcp.identifier == identifier => {
+                    *ncp_states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
+                        Ncp::ConfAcked(attempt)
+                }
+                Ncp::ConfAck(identifier, ..) if ipcp.identifier == identifier => {
+                    *ncp_states.get_mut(&Network::Ipv4).expect("no ipv4 state") = Ncp::Active
+                }
+                _ => {
+                    println!(" <- unexpected ipcp configure-ack {}", ipcp.identifier);
+                    return Ok(());
+                }
+            }
+
+            config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
+
+            println!(
+                " <- ipcp configure-ack {}, address: {}",
+                ipcp.identifier, addr
+            );
+            Ok(())
+        }
+        IpcpData::ConfigureNak(configure_nak) => {
+            let addr = configure_nak
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let IpcpOpt::IpAddr(addr) = &opt.value {
+                        Some(addr.0)
+                    } else {
+                        None
+                    }
+                })
+                .expect("receive ipcp configure-nak without ipv4 address");
+
+            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv4] {
+                Ncp::Configure(identifier, ..) if ipcp.identifier == identifier => {}
+                Ncp::ConfAck(identifier, ..) if ipcp.identifier == identifier => {}
+                _ => {
+                    println!(" <- unexpected ipcp configure-nak {}", ipcp.identifier);
+                    return Ok(());
+                }
+            }
+
+            config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
+
+            println!(" <- ipcp configure-nak {}", ipcp.identifier);
+            Ok(())
+        }
+        IpcpData::ConfigureReject(..) => {
+            // None of our options can be unset.
+            // Ignore the packet and let the negotiation time out.
+
+            match ncp_states.lock().expect("ncp state mutex is poisoned")[&Network::Ipv4] {
+                Ncp::Configure(..) => println!(" <- ipcp configure-reject {}", ipcp.identifier),
+                Ncp::ConfAck(..) => println!(" <- ipcp configure-reject {}", ipcp.identifier),
+                _ => println!(" <- unexpected ipcp configure-reject {}", ipcp.identifier),
+            }
+
+            Ok(())
+        }
+        IpcpData::TerminateRequest(terminate_request) => {
+            *ncp_states
+                .lock()
+                .expect("ncp state mutex is poisoned")
+                .get_mut(&Network::Ipv4)
+                .expect("no ipv4 state") = Ncp::Dead;
+
+            PppPkt::new_ipcp(IpcpPkt::new_terminate_ack(
+                ipcp.identifier,
+                terminate_request.data.clone(),
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            let reason = String::from_utf8(terminate_request.data.clone())
+                .unwrap_or(format!("{:?}", terminate_request.data));
+
+            println!(
+                " <- ipcp terminate-request {}, reason: {}",
+                ipcp.identifier, reason
+            );
+            println!(" -> ipcp terminate-ack {}", ipcp.identifier);
+
+            Ok(())
+        }
+        IpcpData::TerminateAck(..) => {
+            // We never terminate NCPs
+            // so a Terminate-Ack will always be unexpected.
+
+            println!(" <- unexpected lcp terminate-ack {}", ipcp.identifier);
+            Ok(())
+        }
+        IpcpData::CodeReject(code_reject) => {
+            // Should never happen.
+
+            println!(
+                " <- ipcp code-reject {}, packet: {:?}",
+                ipcp.identifier, code_reject.pkt
+            );
+            Ok(())
+        }
+    }
+}
+
+fn handle_ipv6cp(
+    ipv6cp: Ipv6cpPkt,
+    ctl_w: &mut BufWriter<File>,
+    state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config: Arc<Mutex<Ipv6Config>>,
+) -> Result<()> {
+    Ok(())
 }

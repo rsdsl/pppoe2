@@ -1,17 +1,12 @@
 use ppproperly::{AuthProto, MacAddr};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Pppoe {
+    #[default]
     Init,
     Request(MacAddr, Option<Vec<u8>>, usize),
     Active(MacAddr),
     Err,
-}
-
-impl Default for Pppoe {
-    fn default() -> Self {
-        Self::Init
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,4 +26,15 @@ impl Default for Ppp {
     fn default() -> Self {
         Self::Synchronize(1, 1492, rand::random(), 0)
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum Ncp {
+    #[default]
+    Dead,
+    Configure(u8, usize),
+    ConfAck(u8, usize),
+    ConfAcked(usize),
+    Active,
+    Failed,
 }

@@ -625,7 +625,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "ppproperly"
 version = "0.1.0"
-source = "git+https://github.com/rsdsl/ppproperly.git#d41dcb2599f5160b5158a9e9f0bcd786b2236784"
+source = "git+https://github.com/rsdsl/ppproperly.git#e0b75cab5d6835946b790d9188e1d94fc0653f69"
 dependencies = [
  "bitfield",
  "ppproperly_macros",
@@ -747,16 +747,16 @@ checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "rsdsl_ip_config"
-version = "0.1.0"
-source = "git+https://github.com/rsdsl/ip_config.git#e13adb9cc9367ad93f1e947335b0d56108015999"
+version = "0.2.1"
+source = "git+https://github.com/rsdsl/ip_config.git#26c15096a1f4b69c6c06b5373b507c9dbbfc54c5"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "rsdsl_netlinkd"
-version = "0.3.2"
-source = "git+https://github.com/rsdsl/netlinkd.git#e5641588803c096312fb271afa0c7f6ddc4516c0"
+version = "0.4.0"
+source = "git+https://github.com/rsdsl/netlinkd.git#5b1bde77629611ae44f7f0070b757ffba4564165"
 dependencies = [
  "futures-util",
  "netlink-packet-route",
@@ -776,6 +776,7 @@ dependencies = [
  "md5",
  "ppproperly",
  "rand",
+ "rsdsl_ip_config",
  "rsdsl_netlinkd",
  "rsdsl_pppoe2_sys",
  "socket2 0.5.3",
