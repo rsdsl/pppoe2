@@ -269,20 +269,10 @@ fn session(
             match *ppp_state {
                 Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
-                        PppoePkt::new_padt(
-                            remote_mac,
-                            local_mac,
-                            session_id,
-                            vec![PppoeVal::GenericError("Peer not responding".into()).into()],
-                        )
-                        .serialize(&mut sock_disc_w)?;
-                        sock_disc_w.flush()?;
-
-                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
-
-                        *ppp_state = Ppp::Terminated;
-                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
-                        break;
+                        *ppp_state = Ppp::Terminate2(
+                            "Maximum number of Configure-Request attempts exceeded".into(),
+                        );
+                        continue;
                     }
 
                     PppPkt::new_lcp(LcpPkt::new_configure_request(
@@ -304,20 +294,10 @@ fn session(
                 }
                 Ppp::SyncAck(identifier, mru, magic_number, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
-                        PppoePkt::new_padt(
-                            remote_mac,
-                            local_mac,
-                            session_id,
-                            vec![PppoeVal::GenericError("Peer not responding".into()).into()],
-                        )
-                        .serialize(&mut sock_disc_w)?;
-                        sock_disc_w.flush()?;
-
-                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
-
-                        *ppp_state = Ppp::Terminated;
-                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
-                        break;
+                        *ppp_state = Ppp::Terminate2(
+                            "Maximum number of Configure-Request attempts exceeded".into(),
+                        );
+                        continue;
                     }
 
                     PppPkt::new_lcp(LcpPkt::new_configure_request(
@@ -340,20 +320,10 @@ fn session(
                 Ppp::SyncAcked(attempt) => {
                     // Packet handler takes care of the rest.
                     if attempt >= MAX_ATTEMPTS {
-                        PppoePkt::new_padt(
-                            remote_mac,
-                            local_mac,
-                            session_id,
-                            vec![PppoeVal::GenericError("Peer not initiating".into()).into()],
-                        )
-                        .serialize(&mut sock_disc_w)?;
-                        sock_disc_w.flush()?;
-
-                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
-
-                        *ppp_state = Ppp::Terminated;
-                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
-                        break;
+                        *ppp_state = Ppp::Terminate2(
+                            "Maximum number of Configure-Ack attempts exceeded".into(),
+                        );
+                        continue;
                     }
 
                     *ppp_state = Ppp::SyncAcked(attempt + 1);
