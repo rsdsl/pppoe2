@@ -17,6 +17,8 @@ impl Default for Pppoe {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Ppp {
     Synchronize(u8, u16, u32),
+    SyncAck(u8, u16, u32),
+    SyncAcked,
     Auth(AuthProto),
     Active,
     Terminated,

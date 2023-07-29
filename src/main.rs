@@ -5,7 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use ppproperly::{
-    Deserialize, LcpOpt, LcpPkt, MacAddr, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
+    Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PppData, PppPkt, PppoeData, PppoePkt, PppoeVal,
+    Serialize,
 };
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ppp, Pppoe, Result};
@@ -210,7 +211,7 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
     let ppp_state2 = ppp_state.clone();
-    let recv_sess = thread::spawn(move || match recv_session(ctl, ppp, ppp_state2.clone()) {
+    let recv_lcp = thread::spawn(move || match recv_lcp(ctl, ppp_state2.clone()) {
         Ok(_) => Ok(()),
         Err(e) => {
             *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -238,15 +239,32 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
                         identifier, mru, magic_number
                     );
                 }
+                Ppp::SyncAck(identifier, mru, magic_number) => {
+                    PppPkt::new_lcp(LcpPkt::new_configure_request(
+                        identifier,
+                        vec![
+                            LcpOpt::Mru(mru).into(),
+                            LcpOpt::MagicNumber(magic_number).into(),
+                        ],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    println!(
+                        " -> lcp configure-req {}, mru: {}, magic number: {}",
+                        identifier, mru, magic_number
+                    );
+                }
+                Ppp::SyncAcked => {} // Packet handler takes care of the rest.
                 Ppp::Auth(_) => {}
                 Ppp::Active => {}
                 Ppp::Terminated => {
                     break;
                 }
                 Ppp::Err => {
-                    return Err(recv_sess
+                    return Err(recv_lcp
                         .join()
-                        .expect("recv_session panic")
+                        .expect("recv_lcp panic")
                         .expect_err("Ppp::Err state entered without an error"));
                 }
             }
@@ -258,7 +276,7 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
     Ok(())
 }
 
-fn recv_session(ctl: File, _ppp: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl);
 
     loop {
@@ -267,10 +285,31 @@ fn recv_session(ctl: File, _ppp: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
             break;
         }
 
-        let mut pkt = PppPkt::default();
-        pkt.deserialize(&mut ctl_r)?;
+        let mut ppp = PppPkt::default();
+        ppp.deserialize(&mut ctl_r)?;
 
-        println!(" <- ppp lcp {:?}", pkt);
+        let lcp = if let PppData::Lcp(lcp) = ppp.data {
+            lcp
+        } else {
+            unreachable!();
+        };
+        match lcp.data {
+            LcpData::ConfigureAck(..) => {
+                let mut state = state.lock().expect("ppp state mutex is poisoned");
+                match *state {
+                    Ppp::Synchronize(identifier, ..) if lcp.identifier == identifier => {
+                        *state = Ppp::SyncAcked
+                    }
+                    Ppp::SyncAck(identifier, ..) if lcp.identifier == identifier => {
+                        *state = Ppp::SyncAcked
+                    }
+                    _ => {} // Ignore invalid identifiers.
+                }
+
+                println!(" <- lcp configure-ack {}", lcp.identifier);
+            }
+            _ => todo!(),
+        }
     }
 
     Ok(())
