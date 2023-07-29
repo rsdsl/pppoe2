@@ -292,7 +292,7 @@ fn session(
 
                     *ppp_state = Ppp::Synchronize(identifier, mru, magic_number, attempt + 1);
                 }
-                Ppp::SyncAck(identifier, mru, magic_number, attempt) => {
+                Ppp::SyncAck(identifier, mru, ref auth_proto, magic_number, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
                         *ppp_state = Ppp::Terminate2(
                             "Maximum number of Configure-Request attempts exceeded".into(),
@@ -315,7 +315,13 @@ fn session(
                         identifier, mru, magic_number
                     );
 
-                    *ppp_state = Ppp::SyncAck(identifier, mru, magic_number, attempt + 1);
+                    *ppp_state = Ppp::SyncAck(
+                        identifier,
+                        mru,
+                        auth_proto.clone(),
+                        magic_number,
+                        attempt + 1,
+                    );
                 }
                 Ppp::SyncAcked(attempt) => {
                     // Packet handler takes care of the rest.
@@ -487,7 +493,7 @@ fn handle_lcp(
             let mut state = state.lock().expect("ppp state mutex is poisoned");
             match *state {
                 Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
-                    *state = Ppp::SyncAck(identifier, mru, magic_number, attempt)
+                    *state = Ppp::SyncAck(identifier, mru, None, magic_number, attempt)
                 }
                 Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
                 Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone()),
@@ -533,8 +539,8 @@ fn handle_lcp(
                 Ppp::Synchronize(identifier, .., attempt) if lcp.identifier == identifier => {
                     *state = Ppp::SyncAcked(attempt)
                 }
-                Ppp::SyncAck(identifier, .., attempt) if lcp.identifier == identifier => {
-                    *state = Ppp::SyncAcked(attempt)
+                Ppp::SyncAck(identifier, _, ref auth_proto, ..) if lcp.identifier == identifier => {
+                    *state = Ppp::Auth(auth_proto.clone())
                 }
                 _ => {
                     println!(" <- unexpected lcp configure-ack {}", lcp.identifier);
@@ -581,12 +587,13 @@ fn handle_lcp(
                         attempt,
                     )
                 }
-                Ppp::SyncAck(identifier, old_mru, old_magic_number, attempt)
+                Ppp::SyncAck(identifier, old_mru, ref auth_proto, old_magic_number, attempt)
                     if lcp.identifier == identifier =>
                 {
                     *state = Ppp::SyncAck(
                         identifier,
                         mru.unwrap_or(old_mru),
+                        auth_proto.clone(),
                         magic_number.unwrap_or(old_magic_number),
                         attempt,
                     )
