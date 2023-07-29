@@ -280,8 +280,8 @@ fn session(
     let ncp_states2 = ncp_states.clone();
     let config42 = config4.clone();
     let config62 = config6.clone();
-    let recv_sess = thread::spawn(move || {
-        match recv_session(ctl2, ppp_state2.clone(), ncp_states2, config42, config62) {
+    let recv_link_handle = thread::spawn(move || {
+        match recv_link(ctl2, ppp_state2.clone(), ncp_states2, config42, config62) {
             Ok(_) => Ok(()),
             Err(e) => {
                 *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -471,9 +471,9 @@ fn session(
                     break;
                 }
                 Ppp::Err => {
-                    return Err(recv_sess
+                    return Err(recv_link_handle
                         .join()
-                        .expect("recv_session panic")
+                        .expect("recv_link panic")
                         .expect_err("Ppp::Err state entered without an error"));
                 }
             }
@@ -485,7 +485,7 @@ fn session(
     Ok(())
 }
 
-fn recv_session(
+fn recv_link(
     ctl: File,
     state: Arc<Mutex<Ppp>>,
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
@@ -1018,7 +1018,7 @@ fn ipv6cp(
 
 fn handle_ipcp(
     ipcp: IpcpPkt,
-    ctl_w: &mut BufWriter<File>,
+    ppp_w: &mut BufWriter<File>,
     state: Arc<Mutex<Ppp>>,
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv4Config>>,
@@ -1043,8 +1043,8 @@ fn handle_ipcp(
                     ipcp.identifier,
                     vec![IpcpOpt::IpCompressionProtocol(compression.clone()).into()],
                 ))
-                .serialize(ctl_w)?;
-                ctl_w.flush()?;
+                .serialize(ppp_w)?;
+                ppp_w.flush()?;
 
                 println!(
                     " -> ipcp configure-reject {}, compression: {:?} -> None",
@@ -1073,8 +1073,8 @@ fn handle_ipcp(
                 ipcp.identifier,
                 configure_request.options,
             ))
-            .serialize(ctl_w)?;
-            ctl_w.flush()?;
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
 
             println!(" <- ipcp configure-request {}", ipcp.identifier);
             println!(" -> ipcp configure-ack {}", ipcp.identifier);
@@ -1168,8 +1168,8 @@ fn handle_ipcp(
                 ipcp.identifier,
                 terminate_request.data.clone(),
             ))
-            .serialize(ctl_w)?;
-            ctl_w.flush()?;
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
 
             let reason = String::from_utf8(terminate_request.data.clone())
                 .unwrap_or(format!("{:?}", terminate_request.data));
