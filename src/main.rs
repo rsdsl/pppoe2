@@ -254,7 +254,7 @@ fn session(
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
     let ppp_state2 = ppp_state.clone();
-    let recv_lcp = thread::spawn(move || match recv_lcp(ctl, ppp_state2.clone()) {
+    let recv_sess = thread::spawn(move || match recv_session(ctl, ppp_state2.clone()) {
         Ok(_) => Ok(()),
         Err(e) => {
             *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -410,9 +410,9 @@ fn session(
                     break;
                 }
                 Ppp::Err => {
-                    return Err(recv_lcp
+                    return Err(recv_sess
                         .join()
-                        .expect("recv_lcp panic")
+                        .expect("recv_session panic")
                         .expect_err("Ppp::Err state entered without an error"));
                 }
             }
@@ -424,7 +424,7 @@ fn session(
     Ok(())
 }
 
-fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn recv_session(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
     let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
