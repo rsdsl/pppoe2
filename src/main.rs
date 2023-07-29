@@ -635,6 +635,23 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             );
             Ok(())
         }
+        LcpData::EchoRequest(echo_request) => {
+            PppPkt::new_lcp(LcpPkt::new_echo_reply(
+                lcp.identifier,
+                echo_request.magic,
+                echo_request.data.clone(),
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            println!(
+                " <- lcp echo-request {}, magic number: {}, data: {:?}",
+                lcp.identifier, echo_request.magic, echo_request.data
+            );
+            println!(" -> lcp echo-reply {}", lcp.identifier);
+
+            Ok(())
+        }
         LcpData::DiscardRequest(discard_request) => {
             println!(
                 " <- lcp discard-request {}, magic number: {}, data: {:?}",
