@@ -1092,6 +1092,7 @@ fn handle_ipcp(
 
             let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
             match ncp_states[&Network::Ipv4] {
+                Ncp::Dead => {} // If peer sends a request before we do it's not unexpected.
                 Ncp::Configure(identifier, attempt) => {
                     *ncp_states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
                         Ncp::ConfAck(identifier, attempt)
