@@ -536,7 +536,9 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
 
             let mut state = state.lock().expect("ppp state mutex is poisoned");
             match *state {
-                Ppp::Synchronize(identifier, old_mru, old_magic_number, attempt) => {
+                Ppp::Synchronize(identifier, old_mru, old_magic_number, attempt)
+                    if lcp.identifier == identifier =>
+                {
                     *state = Ppp::Synchronize(
                         identifier,
                         mru.unwrap_or(old_mru),
@@ -544,7 +546,9 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
                         attempt,
                     )
                 }
-                Ppp::SyncAck(identifier, old_mru, old_magic_number, attempt) => {
+                Ppp::SyncAck(identifier, old_mru, old_magic_number, attempt)
+                    if lcp.identifier == identifier =>
+                {
                     *state = Ppp::SyncAck(
                         identifier,
                         mru.unwrap_or(old_mru),
