@@ -277,7 +277,8 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
 }
 
 fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
-    let mut ctl_r = BufReader::with_capacity(1500, ctl);
+    let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
+    let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
     loop {
         if !ctl_r.fill_buf().map(|b| !b.is_empty())? {
@@ -293,7 +294,92 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
         } else {
             unreachable!();
         };
+
         match lcp.data {
+            LcpData::ConfigureRequest(configure_request) => {
+                let mru = configure_request
+                    .options
+                    .iter()
+                    .find_map(|opt| {
+                        if let LcpOpt::Mru(mru) = opt.value {
+                            Some(mru)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(1500);
+                let auth_proto = configure_request.options.iter().find_map(|opt| {
+                    if let LcpOpt::AuthenticationProtocol(auth_proto) = &opt.value {
+                        Some(auth_proto.protocol.clone())
+                    } else {
+                        None
+                    }
+                });
+                let pfc = configure_request
+                    .options
+                    .iter()
+                    .any(|opt| opt.value == LcpOpt::ProtocolFieldCompression);
+                let acfc = configure_request
+                    .options
+                    .iter()
+                    .any(|opt| opt.value == LcpOpt::AddrCtlFieldCompression);
+
+                if mru < 1492 {
+                    PppPkt::new_lcp(LcpPkt::new_configure_nak(
+                        lcp.identifier,
+                        vec![LcpOpt::Mru(1492).into()],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    println!(
+                        " -> lcp configure-nak {}, mru: {} -> 1492",
+                        lcp.identifier, mru
+                    );
+                    continue;
+                }
+                if pfc || acfc {
+                    let mut reject = Vec::new();
+                    if pfc {
+                        reject.push(LcpOpt::ProtocolFieldCompression.into());
+                    }
+                    if acfc {
+                        reject.push(LcpOpt::AddrCtlFieldCompression.into());
+                    }
+
+                    PppPkt::new_lcp(LcpPkt::new_configure_reject(lcp.identifier, reject))
+                        .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    println!(
+                        " -> lcp configure-reject {}, pfc: {} -> false, acfc: {} -> false",
+                        lcp.identifier, pfc, acfc
+                    );
+                    continue;
+                }
+
+                PppPkt::new_lcp(LcpPkt::new_configure_ack(
+                    lcp.identifier,
+                    configure_request.options,
+                ))
+                .serialize(&mut ctl_w)?;
+                ctl_w.flush()?;
+
+                let mut state = state.lock().expect("ppp state mutex is poisoned");
+                match *state {
+                    Ppp::Synchronize(identifier, mru, magic_number) => {
+                        *state = Ppp::SyncAck(identifier, mru, magic_number)
+                    }
+                    Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
+                    Ppp::SyncAcked => *state = Ppp::Auth(auth_proto),
+                    _ => println!(
+                        " <- unexpected lcp configure-req {}, mru: {}, authentication: {:?}",
+                        lcp.identifier, mru, auth_proto
+                    ),
+                }
+
+                println!(" -> lcp configure-ack {}", lcp.identifier);
+            }
             LcpData::ConfigureAck(..) => {
                 let mut state = state.lock().expect("ppp state mutex is poisoned");
                 match *state {
@@ -303,12 +389,12 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                     Ppp::SyncAck(identifier, ..) if lcp.identifier == identifier => {
                         *state = Ppp::SyncAcked
                     }
-                    _ => {} // Ignore invalid identifiers.
+                    _ => println!(" <- unexpected lcp configure-ack {}", lcp.identifier),
                 }
 
                 println!(" <- lcp configure-ack {}", lcp.identifier);
             }
-            _ => todo!(),
+            _ => {}
         }
     }
 
