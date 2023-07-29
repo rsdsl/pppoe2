@@ -258,7 +258,7 @@ fn session(
 ) -> Result<()> {
     let mut sock_disc_w = BufWriter::with_capacity(1500, sock_disc);
 
-    let (_sock_sess, ctl, _ppp) = new_session(interface, remote_mac, session_id)?;
+    let (_sock_sess, ctl, ppp) = new_session(interface, remote_mac, session_id)?;
     let mut ctl_w = BufWriter::with_capacity(1500, ctl.try_clone()?);
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
@@ -277,11 +277,20 @@ fn session(
 
     let ctl2 = ctl.try_clone()?;
     let ppp_state2 = ppp_state.clone();
+    let recv_link_handle = thread::spawn(move || match recv_link(ctl2, ppp_state2.clone()) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
+            Err(e)
+        }
+    });
+
+    let ppp_state2 = ppp_state.clone();
     let ncp_states2 = ncp_states.clone();
     let config42 = config4.clone();
     let config62 = config6.clone();
-    let recv_link_handle = thread::spawn(move || {
-        match recv_link(ctl2, ppp_state2.clone(), ncp_states2, config42, config62) {
+    let recv_network_handle = thread::spawn(move || {
+        match recv_network(ppp, ppp_state2.clone(), ncp_states2, config42, config62) {
             Ok(_) => Ok(()),
             Err(e) => {
                 *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
@@ -471,10 +480,17 @@ fn session(
                     break;
                 }
                 Ppp::Err => {
-                    return Err(recv_link_handle
-                        .join()
-                        .expect("recv_link panic")
-                        .expect_err("Ppp::Err state entered without an error"));
+                    return Err(if recv_link_handle.is_finished() {
+                        recv_link_handle
+                            .join()
+                            .expect("recv_link panic")
+                            .expect_err("Ppp::Err state entered without an error")
+                    } else {
+                        recv_network_handle
+                            .join()
+                            .expect("recv_network panic")
+                            .expect_err("Ppp::Err state entered without an error")
+                    });
                 }
             }
         }
@@ -485,13 +501,7 @@ fn session(
     Ok(())
 }
 
-fn recv_link(
-    ctl: File,
-    state: Arc<Mutex<Ppp>>,
-    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
-    config4: Arc<Mutex<Ipv4Config>>,
-    config6: Arc<Mutex<Ipv6Config>>,
-) -> Result<()> {
+fn recv_link(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
     let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
@@ -509,16 +519,43 @@ fn recv_link(
             PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
             PppData::Pap(pap) => handle_pap(pap, state.clone())?,
             PppData::Chap(chap) => handle_chap(chap, &mut ctl_w, state.clone())?,
+            _ => println!(" <- unsupported ppp pkt {:?}", ppp),
+        }
+    }
+
+    Ok(())
+}
+
+fn recv_network(
+    ppp: File,
+    state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
+    config4: Arc<Mutex<Ipv4Config>>,
+    config6: Arc<Mutex<Ipv6Config>>,
+) -> Result<()> {
+    let mut ppp_r = BufReader::with_capacity(1500, ppp.try_clone()?);
+    let mut ppp_w = BufWriter::with_capacity(1500, ppp);
+
+    loop {
+        if !ppp_r.fill_buf().map(|b| !b.is_empty())? {
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Terminated;
+            break;
+        }
+
+        let mut ppp = PppPkt::default();
+        ppp.deserialize(&mut ppp_r)?;
+
+        match ppp.data {
             PppData::Ipcp(ipcp) => handle_ipcp(
                 ipcp,
-                &mut ctl_w,
+                &mut ppp_w,
                 state.clone(),
                 ncp_states.clone(),
                 config4.clone(),
             )?,
             PppData::Ipv6cp(ipv6cp) => handle_ipv6cp(
                 ipv6cp,
-                &mut ctl_w,
+                &mut ppp_w,
                 state.clone(),
                 ncp_states.clone(),
                 config6.clone(),
@@ -1203,7 +1240,7 @@ fn handle_ipcp(
 
 fn handle_ipv6cp(
     ipv6cp: Ipv6cpPkt,
-    ctl_w: &mut BufWriter<File>,
+    ppp_w: &mut BufWriter<File>,
     state: Arc<Mutex<Ppp>>,
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv6Config>>,
