@@ -33,6 +33,14 @@ enum Network {
     Ipv6,
 }
 
+fn ifid(addr: Ipv6Addr) -> u64 {
+    (u128::from(addr) & u64::MAX as u128) as u64
+}
+
+fn ll(if_id: u64) -> Ipv6Addr {
+    ((0xfe80 << 48) | if_id as u128).into()
+}
+
 fn main() -> Result<()> {
     println!("wait for up {}", PPPOE_UPLINK);
 
@@ -1050,7 +1058,76 @@ fn ipv6cp(
     states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv6Config>>,
 ) -> Result<()> {
-    Ok(())
+    let mut ctl_w = BufWriter::with_capacity(1500, ctl);
+
+    {
+        let mut config = config.lock().expect("ipv6 config mutex is poisoned");
+
+        config.laddr = Ipv6Addr::UNSPECIFIED;
+        config.raddr = Ipv6Addr::UNSPECIFIED;
+    }
+
+    loop {
+        {
+            let config = config.lock().expect("ipv6 config mutex is poisoned");
+
+            let mut states = states.lock().expect("ncp state mutex is poisoned");
+            match states[&Network::Ipv6] {
+                Ncp::Dead => {}
+                Ncp::Configure(identifier, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv6).expect("no ipv6 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    PppPkt::new_ipv6cp(Ipv6cpPkt::new_configure_request(
+                        identifier,
+                        vec![Ipv6cpOpt::InterfaceId(ifid(config.laddr)).into()],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    *states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
+                        Ncp::Configure(identifier, attempt + 1);
+
+                    println!(" -> ipv6cp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                }
+                Ncp::ConfAck(identifier, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv6).expect("no ipv6 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    PppPkt::new_ipv6cp(Ipv6cpPkt::new_configure_request(
+                        identifier,
+                        vec![Ipv6cpOpt::InterfaceId(ifid(config.laddr)).into()],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    *states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
+                        Ncp::ConfAck(identifier, attempt + 1);
+
+                    println!(" -> ipv6cp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                }
+                Ncp::ConfAcked(attempt) => {
+                    // Packet handler takes care of the rest.
+
+                    if attempt >= MAX_ATTEMPTS {
+                        *states.get_mut(&Network::Ipv6).expect("no ipv6 state") = Ncp::Failed;
+                        continue;
+                    }
+
+                    *states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
+                        Ncp::ConfAcked(attempt + 1);
+                }
+                Ncp::Active => {}
+                Ncp::Failed => {}
+            }
+        }
+
+        thread::sleep(PPPOE_XMIT_INTERVAL);
+    }
 }
 
 fn handle_ipcp(
@@ -1168,8 +1245,7 @@ fn handle_ipcp(
                 })
                 .expect("receive ipcp configure-nak without ipv4 address");
 
-            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
-            match ncp_states[&Network::Ipv4] {
+            match ncp_states.lock().expect("ncp state mutex is poisoned")[&Network::Ipv4] {
                 Ncp::Configure(identifier, ..) if ipcp.identifier == identifier => {}
                 Ncp::ConfAck(identifier, ..) if ipcp.identifier == identifier => {}
                 _ => {
@@ -1246,5 +1322,178 @@ fn handle_ipv6cp(
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv6Config>>,
 ) -> Result<()> {
-    Ok(())
+    if *state.lock().expect("ppp state mutex is poisoned") != Ppp::Active {
+        println!(" <- unexpected ipv6cp");
+        return Ok(());
+    }
+
+    match ipv6cp.data {
+        Ipv6cpData::ConfigureRequest(configure_request) => {
+            let if_id = configure_request
+                .options
+                .iter()
+                .map(|opt| {
+                    let Ipv6cpOpt::InterfaceId(if_id) = &opt.value;
+                    *if_id
+                })
+                .next()
+                .expect("receive ipv6cp configure-request without ipv6 interface identifier");
+
+            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv6] {
+                Ncp::Dead => {} // If peer sends a request before we do it's not unexpected.
+                Ncp::Configure(identifier, attempt) => {
+                    *ncp_states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
+                        Ncp::ConfAck(identifier, attempt)
+                }
+                Ncp::ConfAck(..) => {} // Simply retransmit our previous ack.
+                Ncp::ConfAcked(..) => {
+                    *ncp_states.get_mut(&Network::Ipv6).expect("no ipv6 state") = Ncp::Active
+                }
+                _ => {
+                    println!(
+                        " <- unexpected ipv6cp configure-request {}",
+                        ipv6cp.identifier
+                    );
+                    return Ok(());
+                }
+            }
+
+            PppPkt::new_ipv6cp(Ipv6cpPkt::new_configure_ack(
+                ipv6cp.identifier,
+                configure_request.options,
+            ))
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
+
+            let addr = ll(if_id);
+            config.lock().expect("ipv6 config mutex is poisoned").raddr = addr;
+
+            println!(
+                " <- ipv6cp configure-request {}, address: {}",
+                ipv6cp.identifier, addr
+            );
+            println!(" -> ipv6cp configure-ack {}", ipv6cp.identifier);
+
+            Ok(())
+        }
+        Ipv6cpData::ConfigureAck(configure_ack) => {
+            let if_id = configure_ack
+                .options
+                .iter()
+                .map(|opt| {
+                    let Ipv6cpOpt::InterfaceId(if_id) = &opt.value;
+                    *if_id
+                })
+                .next()
+                .expect("receive ipv6cp configure-ack without ipv6 interface identifier");
+
+            let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv6] {
+                Ncp::Configure(identifier, attempt) if ipv6cp.identifier == identifier => {
+                    *ncp_states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
+                        Ncp::ConfAcked(attempt)
+                }
+                Ncp::ConfAck(identifier, ..) if ipv6cp.identifier == identifier => {
+                    *ncp_states.get_mut(&Network::Ipv6).expect("no ipv6 state") = Ncp::Active
+                }
+                _ => {
+                    println!(" <- unexpected ipv6cp configure-ack {}", ipv6cp.identifier);
+                    return Ok(());
+                }
+            }
+
+            let addr = ll(if_id);
+            config.lock().expect("ipv6 config mutex is poisoned").laddr = addr;
+
+            println!(
+                " <- ipv6cp configure-ack {}, address: {}",
+                ipv6cp.identifier, addr
+            );
+            Ok(())
+        }
+        Ipv6cpData::ConfigureNak(configure_nak) => {
+            let if_id = configure_nak
+                .options
+                .iter()
+                .map(|opt| {
+                    let Ipv6cpOpt::InterfaceId(if_id) = &opt.value;
+                    *if_id
+                })
+                .next()
+                .expect("receive ipv6cp configure-nak without ipv6 interface identifier");
+
+            let ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
+            match ncp_states[&Network::Ipv6] {
+                Ncp::Configure(identifier, ..) if ipv6cp.identifier == identifier => {}
+                Ncp::ConfAck(identifier, ..) if ipv6cp.identifier == identifier => {}
+                _ => {
+                    println!(" <- unexpected ipv6cp configure-nak {}", ipv6cp.identifier);
+                    return Ok(());
+                }
+            }
+
+            let addr = ll(if_id);
+            config.lock().expect("ipv6 config mutex is poisoned").laddr = addr;
+
+            println!(" <- ipv6cp configure-nak {}", ipv6cp.identifier);
+            Ok(())
+        }
+        Ipv6cpData::ConfigureReject(..) => {
+            // None of our options can be unset.
+            // Ignore the packet and let the negotiation time out.
+
+            match ncp_states.lock().expect("ncp state mutex is poisoned")[&Network::Ipv6] {
+                Ncp::Configure(..) => println!(" <- ipv6cp configure-reject {}", ipv6cp.identifier),
+                Ncp::ConfAck(..) => println!(" <- ipv6cp configure-reject {}", ipv6cp.identifier),
+                _ => println!(
+                    " <- unexpected ipv6cp configure-reject {}",
+                    ipv6cp.identifier
+                ),
+            }
+
+            Ok(())
+        }
+        Ipv6cpData::TerminateRequest(terminate_request) => {
+            *ncp_states
+                .lock()
+                .expect("ncp state mutex is poisoned")
+                .get_mut(&Network::Ipv6)
+                .expect("no ipv6 state") = Ncp::Dead;
+
+            PppPkt::new_ipv6cp(Ipv6cpPkt::new_terminate_ack(
+                ipv6cp.identifier,
+                terminate_request.data.clone(),
+            ))
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
+
+            let reason = String::from_utf8(terminate_request.data.clone())
+                .unwrap_or(format!("{:?}", terminate_request.data));
+
+            println!(
+                " <- ipv6cp terminate-request {}, reason: {}",
+                ipv6cp.identifier, reason
+            );
+            println!(" -> ipv6cp terminate-ack {}", ipv6cp.identifier);
+
+            Ok(())
+        }
+        Ipv6cpData::TerminateAck(..) => {
+            // We never terminate NCPs
+            // so a Terminate-Ack will always be unexpected.
+
+            println!(" <- unexpected lcp terminate-ack {}", ipv6cp.identifier);
+            Ok(())
+        }
+        Ipv6cpData::CodeReject(code_reject) => {
+            // Should never happen.
+
+            println!(
+                " <- ipv6cp code-reject {}, packet: {:?}",
+                ipv6cp.identifier, code_reject.pkt
+            );
+            Ok(())
+        }
+    }
 }
