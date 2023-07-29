@@ -336,7 +336,27 @@ fn session(
 
                     *ppp_state = Ppp::SyncAck(identifier, mru, magic_number, attempt + 1);
                 }
-                Ppp::SyncAcked => {} // Packet handler takes care of the rest.
+                Ppp::SyncAcked(attempt) => {
+                    // Packet handler takes care of the rest.
+                    if attempt >= MAX_ATTEMPTS {
+                        PppoePkt::new_padt(
+                            remote_mac,
+                            local_mac,
+                            session_id,
+                            vec![PppoeVal::GenericError("Peer not initiating".into()).into()],
+                        )
+                        .serialize(&mut sock_disc_w)?;
+                        sock_disc_w.flush()?;
+
+                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
+
+                        *ppp_state = Ppp::Terminated;
+                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
+                        break;
+                    }
+
+                    *ppp_state = Ppp::SyncAcked(attempt + 1);
+                }
                 Ppp::Auth(_) => {}
                 Ppp::Active => {}
                 Ppp::Terminated => {
@@ -445,7 +465,7 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                         *state = Ppp::SyncAck(identifier, mru, magic_number, attempt)
                     }
                     Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
-                    Ppp::SyncAcked => *state = Ppp::Auth(auth_proto.clone()),
+                    Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone()),
                     _ => {
                         println!(
                             " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
@@ -471,11 +491,11 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
             LcpData::ConfigureAck(..) => {
                 let mut state = state.lock().expect("ppp state mutex is poisoned");
                 match *state {
-                    Ppp::Synchronize(identifier, ..) if lcp.identifier == identifier => {
-                        *state = Ppp::SyncAcked
+                    Ppp::Synchronize(identifier, .., attempt) if lcp.identifier == identifier => {
+                        *state = Ppp::SyncAcked(attempt)
                     }
-                    Ppp::SyncAck(identifier, ..) if lcp.identifier == identifier => {
-                        *state = Ppp::SyncAcked
+                    Ppp::SyncAck(identifier, .., attempt) if lcp.identifier == identifier => {
+                        *state = Ppp::SyncAcked(attempt)
                     }
                     _ => println!(" <- unexpected lcp configure-ack {}", lcp.identifier),
                 }
