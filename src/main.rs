@@ -15,6 +15,7 @@ use socket2::Socket;
 
 const PPPOE_UPLINK: &str = "eth1";
 const MAX_ATTEMPTS: usize = 10;
+const MAX_STATUS_ATTEMPTS: usize = 2;
 
 static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(3);
 static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
@@ -359,6 +360,50 @@ fn session(
                 }
                 Ppp::Auth(_) => {}
                 Ppp::Active => {}
+                Ppp::Terminate(ref reason, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *ppp_state = Ppp::Terminate2(
+                            String::from_utf8(reason.clone()).unwrap_or(String::new()),
+                        );
+                        continue;
+                    }
+
+                    PppPkt::new_lcp(LcpPkt::new_terminate_request(
+                        rand::random(),
+                        reason.clone(),
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    let reason_pretty =
+                        String::from_utf8(reason.clone()).unwrap_or(format!("{:?}", reason));
+
+                    println!(
+                        " -> lcp terminate-request {}/{}, reason: {}",
+                        attempt, MAX_STATUS_ATTEMPTS, reason_pretty
+                    );
+
+                    *ppp_state = Ppp::Terminate(reason.clone(), attempt + 1);
+                }
+                Ppp::Terminate2(ref reason) => {
+                    PppoePkt::new_padt(
+                        remote_mac,
+                        local_mac,
+                        session_id,
+                        vec![PppoeVal::GenericError(reason.clone()).into()],
+                    )
+                    .serialize(&mut sock_disc_w)?;
+                    sock_disc_w.flush()?;
+
+                    println!(
+                        " -> [{}] padt, session id: {}, reason: {}",
+                        remote_mac, session_id, reason
+                    );
+
+                    *ppp_state = Ppp::Terminated;
+                    *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
+                    break;
+                }
                 Ppp::Terminated => {
                     break;
                 }
@@ -594,6 +639,22 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             );
             println!(" -> lcp terminate-ack {}", lcp.identifier);
 
+            Ok(())
+        }
+        LcpData::TerminateAck(..) => {
+            let mut state = state.lock().expect("ppp state mutex is poisoned");
+            match *state {
+                Ppp::Terminate(ref reason, ..) => {
+                    *state =
+                        Ppp::Terminate2(String::from_utf8(reason.clone()).unwrap_or(String::new()))
+                }
+                _ => {
+                    println!(" <- unexpected lcp terminate-ack {}", lcp.identifier);
+                    return Ok(());
+                }
+            }
+
+            println!(" <- lcp terminate-ack {}", lcp.identifier);
             Ok(())
         }
         _ => Ok(()),

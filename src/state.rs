@@ -21,6 +21,8 @@ pub enum Ppp {
     SyncAcked(usize),
     Auth(Option<AuthProto>),
     Active,
+    Terminate(Vec<u8>, usize),
+    Terminate2(String),
     Terminated,
     Err,
 }
