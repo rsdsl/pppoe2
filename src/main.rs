@@ -235,7 +235,7 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
                     ctl_w.flush()?;
 
                     println!(
-                        " -> lcp configure-req {}, mru: {}, magic number: {}",
+                        " -> lcp configure-request {}, mru: {}, magic number: {}",
                         identifier, mru, magic_number
                     );
                 }
@@ -251,7 +251,7 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
                     ctl_w.flush()?;
 
                     println!(
-                        " -> lcp configure-req {}, mru: {}, magic number: {}",
+                        " -> lcp configure-request {}, mru: {}, magic number: {}",
                         identifier, mru, magic_number
                     );
                 }
@@ -367,7 +367,7 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                     Ppp::SyncAcked => *state = Ppp::Auth(auth_proto),
                     _ => {
                         println!(
-                            " <- unexpected lcp configure-req {}, mru: {}, authentication: {:?}",
+                            " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
                             lcp.identifier, mru, auth_proto
                         );
                         continue;
