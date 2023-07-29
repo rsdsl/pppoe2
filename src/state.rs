@@ -16,8 +16,8 @@ impl Default for Pppoe {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Ppp {
-    Synchronize(u8, u16, u32),
-    SyncAck(u8, u16, u32),
+    Synchronize(u8, u16, u32, usize),
+    SyncAck(u8, u16, u32, usize),
     SyncAcked,
     Auth(Option<AuthProto>),
     Active,
@@ -27,6 +27,6 @@ pub enum Ppp {
 
 impl Default for Ppp {
     fn default() -> Self {
-        Self::Synchronize(1, 1492, rand::random())
+        Self::Synchronize(1, 1492, rand::random(), 0)
     }
 }

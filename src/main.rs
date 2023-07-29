@@ -108,7 +108,7 @@ fn recv_discovery(
     state: Arc<Mutex<Pppoe>>,
 ) -> Result<()> {
     let mut sock_w = BufWriter::with_capacity(1500, sock.try_clone()?);
-    let mut sock_r = BufReader::with_capacity(1500, sock);
+    let mut sock_r = BufReader::with_capacity(1500, sock.try_clone()?);
 
     loop {
         let mut pkt = PppoePkt::default();
@@ -179,12 +179,22 @@ fn recv_discovery(
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             PppoeData::Pads(_) => {
+                let state2 = state.clone();
+
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
                 if let Pppoe::Request(..) = *state {
                     let interface2 = interface.to_owned();
+                    let sock2 = sock.try_clone()?;
                     thread::spawn(move || {
                         thread::sleep(SESSION_INIT_GRACE_PERIOD);
-                        match session(&interface2, pkt.src_mac, pkt.session_id) {
+                        match session(
+                            &interface2,
+                            sock2,
+                            pkt.src_mac,
+                            local_mac,
+                            state2,
+                            pkt.session_id,
+                        ) {
                             Ok(_) => {}
                             Err(e) => eprintln!("{}", e),
                         }
@@ -228,7 +238,16 @@ fn recv_discovery(
     }
 }
 
-fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
+fn session(
+    interface: &str,
+    sock_disc: Socket,
+    remote_mac: MacAddr,
+    local_mac: MacAddr,
+    pppoe_state: Arc<Mutex<Pppoe>>,
+    session_id: u16,
+) -> Result<()> {
+    let mut sock_disc_w = BufWriter::with_capacity(1500, sock_disc);
+
     let (_sock_sess, ctl, _ppp) = new_session(interface, remote_mac, session_id)?;
     let mut ctl_w = BufWriter::with_capacity(1500, ctl.try_clone()?);
 
@@ -245,9 +264,26 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
 
     loop {
         {
-            let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
+            let mut ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
             match *ppp_state {
-                Ppp::Synchronize(identifier, mru, magic_number) => {
+                Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        PppoePkt::new_padt(
+                            remote_mac,
+                            local_mac,
+                            session_id,
+                            vec![PppoeVal::GenericError("Peer not responding".into()).into()],
+                        )
+                        .serialize(&mut sock_disc_w)?;
+                        sock_disc_w.flush()?;
+
+                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
+
+                        *ppp_state = Ppp::Terminated;
+                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
+                        break;
+                    }
+
                     PppPkt::new_lcp(LcpPkt::new_configure_request(
                         identifier,
                         vec![
@@ -262,8 +298,27 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
                         " -> lcp configure-request {}, mru: {}, magic number: {}",
                         identifier, mru, magic_number
                     );
+
+                    *ppp_state = Ppp::Synchronize(identifier, mru, magic_number, attempt + 1);
                 }
-                Ppp::SyncAck(identifier, mru, magic_number) => {
+                Ppp::SyncAck(identifier, mru, magic_number, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        PppoePkt::new_padt(
+                            remote_mac,
+                            local_mac,
+                            session_id,
+                            vec![PppoeVal::GenericError("Peer not responding".into()).into()],
+                        )
+                        .serialize(&mut sock_disc_w)?;
+                        sock_disc_w.flush()?;
+
+                        println!(" -> [{}] padt, session id: {}", remote_mac, session_id);
+
+                        *ppp_state = Ppp::Terminated;
+                        *pppoe_state.lock().expect("pppoe state mutex is poisoned") = Pppoe::Init;
+                        break;
+                    }
+
                     PppPkt::new_lcp(LcpPkt::new_configure_request(
                         identifier,
                         vec![
@@ -278,6 +333,8 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
                         " -> lcp configure-request {}, mru: {}, magic number: {}",
                         identifier, mru, magic_number
                     );
+
+                    *ppp_state = Ppp::SyncAck(identifier, mru, magic_number, attempt + 1);
                 }
                 Ppp::SyncAcked => {} // Packet handler takes care of the rest.
                 Ppp::Auth(_) => {}
@@ -384,8 +441,8 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
 
                 let mut state = state.lock().expect("ppp state mutex is poisoned");
                 match *state {
-                    Ppp::Synchronize(identifier, mru, magic_number) => {
-                        *state = Ppp::SyncAck(identifier, mru, magic_number)
+                    Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
+                        *state = Ppp::SyncAck(identifier, mru, magic_number, attempt)
                     }
                     Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
                     Ppp::SyncAcked => *state = Ppp::Auth(auth_proto.clone()),
