@@ -577,6 +577,25 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
 
             Ok(())
         }
+        LcpData::TerminateRequest(terminate_request) => {
+            PppPkt::new_lcp(LcpPkt::new_terminate_ack(
+                lcp.identifier,
+                terminate_request.data.clone(),
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            let reason = String::from_utf8(terminate_request.data.clone())
+                .unwrap_or(format!("{:?}", terminate_request.data));
+
+            println!(
+                " <- lcp terminate-request {}, reason: {}",
+                lcp.identifier, reason
+            );
+            println!(" -> lcp terminate-ack {}", lcp.identifier);
+
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
