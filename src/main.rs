@@ -17,6 +17,7 @@ const PPPOE_UPLINK: &str = "eth1";
 const MAX_ATTEMPTS: usize = 10;
 
 static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(8);
+static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
     println!("wait for up {}", PPPOE_UPLINK);
@@ -35,16 +36,15 @@ fn connect(interface: &str) -> Result<()> {
 
     let interface2 = interface.to_owned();
     let pppoe_state2 = pppoe_state.clone();
-    let recv_disc =
-        thread::spawn(
-            move || match recv_discovery(&interface2, sock_disc, pppoe_state2.clone()) {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    *pppoe_state2.lock().expect("pppoe state mutex is poisoned") = Pppoe::Err;
-                    Err(e)
-                }
-            },
-        );
+    let recv_disc = thread::spawn(move || {
+        match recv_discovery(&interface2, sock_disc, local_mac, pppoe_state2.clone()) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                *pppoe_state2.lock().expect("pppoe state mutex is poisoned") = Pppoe::Err;
+                Err(e)
+            }
+        }
+    });
 
     loop {
         {
@@ -101,7 +101,13 @@ fn connect(interface: &str) -> Result<()> {
     }
 }
 
-fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Result<()> {
+fn recv_discovery(
+    interface: &str,
+    sock: Socket,
+    local_mac: MacAddr,
+    state: Arc<Mutex<Pppoe>>,
+) -> Result<()> {
+    let mut sock_w = BufWriter::with_capacity(1500, sock.try_clone()?);
     let mut sock_r = BufReader::with_capacity(1500, sock);
 
     loop {
@@ -152,7 +158,24 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                     continue;
                 }
 
-                *state = Pppoe::Request(pkt.src_mac, ac_cookie, 0);
+                PppoePkt::new_padr(
+                    pkt.src_mac,
+                    local_mac,
+                    if let Some(ref ac_cookie) = ac_cookie {
+                        vec![
+                            PppoeVal::ServiceName("".into()).into(),
+                            PppoeVal::AcCookie(ac_cookie.to_owned()).into(),
+                        ]
+                    } else {
+                        vec![PppoeVal::ServiceName("".into()).into()]
+                    },
+                )
+                .serialize(&mut sock_w)?;
+                sock_w.flush()?;
+
+                *state = Pppoe::Request(pkt.src_mac, ac_cookie, 1);
+
+                println!(" -> [{}] padr 0/{}", pkt.src_mac, MAX_ATTEMPTS);
                 println!(" <- [{}] pado, ac: {}", pkt.src_mac, ac_name);
             }
             PppoeData::Pads(_) => {
@@ -160,6 +183,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
                 if let Pppoe::Request(..) = *state {
                     let interface2 = interface.to_owned();
                     thread::spawn(move || {
+                        thread::sleep(SESSION_INIT_GRACE_PERIOD);
                         match session(&interface2, pkt.src_mac, pkt.session_id) {
                             Ok(_) => {}
                             Err(e) => eprintln!("{}", e),
