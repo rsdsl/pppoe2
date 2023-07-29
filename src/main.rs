@@ -229,7 +229,7 @@ fn recv_discovery(
 }
 
 fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
-    let (_sock_sess, ctl, ppp) = new_session(interface, remote_mac, session_id)?;
+    let (_sock_sess, ctl, _ppp) = new_session(interface, remote_mac, session_id)?;
     let mut ctl_w = BufWriter::with_capacity(1500, ctl.try_clone()?);
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
