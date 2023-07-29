@@ -226,13 +226,9 @@ fn recv_discovery(
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
                 if let Pppoe::Active(_) = *state {
                     *state = Pppoe::Init;
-                    println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
-                } else {
-                    println!(
-                        " <- [{}] unexpected padt, error: {}",
-                        pkt.src_mac, generic_error
-                    );
                 }
+
+                println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
             _ => println!(" <- [{}] unsupported pkt {:?}", pkt.src_mac, pkt),
         }
