@@ -521,7 +521,8 @@ fn handle_lcp(
             let mut state = state.lock().expect("ppp state mutex is poisoned");
             match *state {
                 Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
-                    *state = Ppp::SyncAck(identifier, mru, None, magic_number, attempt)
+                    *state =
+                        Ppp::SyncAck(identifier, mru, auth_proto.clone(), magic_number, attempt)
                 }
                 Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
                 Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone(), 0),
