@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use ppproperly::{
-    AuthProto, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData, PppPkt,
-    PppoeData, PppoePkt, PppoeVal, Serialize,
+    AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr,
+    PapData, PapPkt, PppData, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
 };
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ppp, Pppoe, Result};
@@ -441,6 +441,7 @@ fn recv_session(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
         match ppp.data {
             PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
             PppData::Pap(pap) => handle_pap(pap, state.clone())?,
+            PppData::Chap(chap) => handle_chap(chap, &mut ctl_w, state.clone())?,
             _ => println!(" <- unhandled ppp {:?}", ppp),
         }
     }
@@ -769,6 +770,78 @@ fn handle_pap(pap: PapPkt, state: Arc<Mutex<Ppp>>) -> Result<()> {
             println!(
                 " <- pap authenticate-nak {}, reason: {}",
                 pap.identifier, authenticate_nak.msg
+            );
+            Ok(())
+        }
+    }
+}
+
+fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    let algorithm = match *state.lock().expect("ppp state mutex is poisoned") {
+        Ppp::Auth(Some(AuthProto::Chap(algo)), ..) => algo,
+        _ => {
+            println!(" <- unexpected chap");
+            return Ok(());
+        }
+    };
+
+    match chap.data {
+        ChapData::Challenge(chap_challenge) => {
+            let mut hash_input = Vec::new();
+
+            hash_input.push(chap.identifier);
+            hash_input.extend_from_slice(PASSWORD.as_bytes());
+            hash_input.extend_from_slice(&chap_challenge.value);
+
+            let challenge_hash = match algorithm {
+                ChapAlgorithm::Md5 => *md5::compute(hash_input),
+            };
+
+            PppPkt::new_chap(ChapPkt::new_response(
+                chap.identifier,
+                challenge_hash.to_vec(),
+                USERNAME.into(),
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            println!(
+                " <- chap challenge {}, name: {}, value: {:?}",
+                chap.identifier, chap_challenge.name, chap_challenge.value
+            );
+            println!(
+                " -> chap response {}, name: {}, value: {:?}",
+                chap.identifier, USERNAME, challenge_hash
+            );
+
+            Ok(())
+        }
+        ChapData::Response(chap_response) => {
+            // We never ask the peer to authenticate itself
+            // so a Response will always be unexpected.
+
+            println!(
+                " <- unexpected chap response {}, name: {}, value: {:?}",
+                chap.identifier, chap_response.name, chap_response.value
+            );
+            Ok(())
+        }
+        ChapData::Success(chap_success) => {
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active;
+
+            println!(
+                " <- chap success {}, message: {}",
+                chap.identifier, chap_success.message
+            );
+            Ok(())
+        }
+        ChapData::Failure(chap_failure) => {
+            // The peer should terminate the session
+            // which is already handled by LCP.
+
+            println!(
+                " <- chap failure {}, reason: {}",
+                chap.identifier, chap_failure.message
             );
             Ok(())
         }
