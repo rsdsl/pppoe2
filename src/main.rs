@@ -1013,7 +1013,10 @@ fn ipcp(
                     *states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
                         Ncp::Configure(identifier, attempt + 1);
 
-                    println!(" -> ipcp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                    println!(
+                        " -> ipcp configure-request {}/{}, address: {}",
+                        attempt, MAX_ATTEMPTS, config.addr
+                    );
                 }
                 Ncp::ConfAck(identifier, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
@@ -1031,7 +1034,10 @@ fn ipcp(
                     *states.get_mut(&Network::Ipv4).expect("no ipv4 state") =
                         Ncp::ConfAck(identifier, attempt + 1);
 
-                    println!(" -> ipcp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                    println!(
+                        " -> ipcp configure-request {}/{}, address: {}",
+                        attempt, MAX_ATTEMPTS, config.addr
+                    );
                 }
                 Ncp::ConfAcked(attempt) => {
                     // Packet handler takes care of the rest.
@@ -1090,7 +1096,10 @@ fn ipv6cp(
                     *states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
                         Ncp::Configure(identifier, attempt + 1);
 
-                    println!(" -> ipv6cp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                    println!(
+                        " -> ipv6cp configure-request {}/{}, address: {}",
+                        attempt, MAX_ATTEMPTS, config.laddr
+                    );
                 }
                 Ncp::ConfAck(identifier, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
@@ -1108,7 +1117,10 @@ fn ipv6cp(
                     *states.get_mut(&Network::Ipv6).expect("no ipv6 state") =
                         Ncp::ConfAck(identifier, attempt + 1);
 
-                    println!(" -> ipv6cp configure-request {}/{}", attempt, MAX_ATTEMPTS);
+                    println!(
+                        " -> ipv6cp configure-request {}/{}, address: {}",
+                        attempt, MAX_ATTEMPTS, config.laddr
+                    );
                 }
                 Ncp::ConfAcked(attempt) => {
                     // Packet handler takes care of the rest.
@@ -1226,10 +1238,7 @@ fn handle_ipcp(
 
             config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
 
-            println!(
-                " <- ipcp configure-ack {}, address: {}",
-                ipcp.identifier, addr
-            );
+            println!(" <- ipcp configure-ack {}", ipcp.identifier);
             Ok(())
         }
         IpcpData::ConfigureNak(configure_nak) => {
@@ -1256,7 +1265,19 @@ fn handle_ipcp(
 
             config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
 
+            PppPkt::new_ipcp(IpcpPkt::new_configure_request(
+                ipcp.identifier,
+                vec![IpcpOpt::IpAddr(addr.into()).into()],
+            ))
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
+
             println!(" <- ipcp configure-nak {}", ipcp.identifier);
+            println!(
+                " -> ipcp configure-request {}, address: {}",
+                ipcp.identifier, addr
+            );
+
             Ok(())
         }
         IpcpData::ConfigureReject(..) => {
@@ -1406,10 +1427,7 @@ fn handle_ipv6cp(
             let addr = ll(if_id);
             config.lock().expect("ipv6 config mutex is poisoned").laddr = addr;
 
-            println!(
-                " <- ipv6cp configure-ack {}, address: {}",
-                ipv6cp.identifier, addr
-            );
+            println!(" <- ipv6cp configure-ack {}", ipv6cp.identifier);
             Ok(())
         }
         Ipv6cpData::ConfigureNak(configure_nak) => {
@@ -1436,7 +1454,19 @@ fn handle_ipv6cp(
             let addr = ll(if_id);
             config.lock().expect("ipv6 config mutex is poisoned").laddr = addr;
 
+            PppPkt::new_ipv6cp(Ipv6cpPkt::new_configure_request(
+                ipv6cp.identifier,
+                vec![Ipv6cpOpt::InterfaceId(if_id).into()],
+            ))
+            .serialize(ppp_w)?;
+            ppp_w.flush()?;
+
             println!(" <- ipv6cp configure-nak {}", ipv6cp.identifier);
+            println!(
+                " -> ipv6cp configure-request {}, address: {}",
+                ipv6cp.identifier, addr
+            );
+
             Ok(())
         }
         Ipv6cpData::ConfigureReject(..) => {
