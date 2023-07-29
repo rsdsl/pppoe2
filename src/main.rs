@@ -109,7 +109,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
         pkt.deserialize(&mut sock_r)?;
 
         match *state.lock().expect("pppoe state mutex is poisoned") {
-            Pppoe::Request(remote_mac, _, _) => {
+            Pppoe::Request(remote_mac, ..) => {
                 if pkt.src_mac != remote_mac {
                     println!(" <- [{}] unexpected mac, pkt: {:?}", pkt.src_mac, pkt);
                     continue;
@@ -157,7 +157,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
             }
             PppoeData::Pads(_) => {
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
-                if let Pppoe::Request(_, _, _) = *state {
+                if let Pppoe::Request(..) = *state {
                     let interface2 = interface.to_owned();
                     thread::spawn(move || {
                         match session(&interface2, pkt.src_mac, pkt.session_id) {
