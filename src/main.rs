@@ -503,7 +503,10 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
                 Ppp::SyncAck(identifier, .., attempt) if lcp.identifier == identifier => {
                     *state = Ppp::SyncAcked(attempt)
                 }
-                _ => println!(" <- unexpected lcp configure-ack {}", lcp.identifier),
+                _ => {
+                    println!(" <- unexpected lcp configure-ack {}", lcp.identifier);
+                    return Ok(());
+                }
             }
 
             println!(" <- lcp configure-ack {}", lcp.identifier);
