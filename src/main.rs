@@ -636,6 +636,15 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             );
             Ok(())
         }
+        LcpData::ProtocolReject(protocol_reject) => {
+            // TODO: update ncp state to failed
+
+            println!(
+                " <- lcp protocol-reject {}, protocol: {}, packet: {:?}",
+                lcp.identifier, protocol_reject.protocol, protocol_reject.pkt
+            );
+            Ok(())
+        }
         LcpData::EchoRequest(echo_request) => {
             PppPkt::new_lcp(LcpPkt::new_echo_reply(
                 lcp.identifier,
@@ -670,6 +679,5 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             );
             Ok(())
         }
-        _ => Ok(()),
     }
 }
