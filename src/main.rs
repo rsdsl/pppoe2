@@ -411,7 +411,7 @@ fn session(
                     let mut ncps = ncp_states.lock().expect("ncp state mutex is poisoned");
                     for (ncp, state) in ncps.iter_mut() {
                         if *state == Ncp::Dead {
-                            *state = Ncp::Configure(rand::random(), 0);
+                            *state = Ncp::Configure(1, 0);
 
                             let ctl2 = ctl.try_clone()?;
                             let ncp_states2 = ncp_states.clone();
