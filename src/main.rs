@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use ppproperly::{
-    AuthProto, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PapPkt, PppData, PppPkt, PppoeData,
-    PppoePkt, PppoeVal, Serialize,
+    AuthProto, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData, PppPkt,
+    PppoeData, PppoePkt, PppoeVal, Serialize,
 };
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ppp, Pppoe, Result};
@@ -440,6 +440,7 @@ fn recv_session(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
 
         match ppp.data {
             PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
+            PppData::Pap(pap) => handle_pap(pap, state.clone())?,
             _ => println!(" <- unhandled ppp {:?}", ppp),
         }
     }
@@ -729,6 +730,45 @@ fn handle_lcp(
             println!(
                 " <- lcp discard-request {}, magic number: {}, data: {:?}",
                 lcp.identifier, discard_request.magic, discard_request.data
+            );
+            Ok(())
+        }
+    }
+}
+
+fn handle_pap(pap: PapPkt, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    match *state.lock().expect("ppp state mutex is poisoned") {
+        Ppp::Auth(Some(AuthProto::Pap), ..) => {}
+        _ => {
+            println!(" <- unexpected pap");
+            return Ok(());
+        }
+    }
+
+    match pap.data {
+        PapData::AuthenticateRequest(..) => {
+            // We never ask the peer to authenticate itself
+            // so an Authenticate-Request will always be unexpected.
+
+            println!(" <- unexpected pap authenticate-request {}", pap.identifier);
+            Ok(())
+        }
+        PapData::AuthenticateAck(authenticate_ack) => {
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active;
+
+            println!(
+                " <- pap authenticate-ack {}, message: {}",
+                pap.identifier, authenticate_ack.msg
+            );
+            Ok(())
+        }
+        PapData::AuthenticateNak(authenticate_nak) => {
+            // The peer should terminate the session
+            // which is already handled by LCP.
+
+            println!(
+                " <- pap authenticate-nak {}, reason: {}",
+                pap.identifier, authenticate_nak.msg
             );
             Ok(())
         }
