@@ -38,7 +38,7 @@ fn ifid(addr: Ipv6Addr) -> u64 {
 }
 
 fn ll(if_id: u64) -> Ipv6Addr {
-    ((0xfe80 << 48) | if_id as u128).into()
+    ((0xfe80 << 112) | if_id as u128).into()
 }
 
 fn main() -> Result<()> {
