@@ -629,6 +629,7 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
         }
         LcpData::CodeReject(code_reject) => {
             // Should never happen.
+
             println!(
                 " <- lcp code-reject {}, packet: {:?}",
                 lcp.identifier, code_reject.pkt
@@ -650,6 +651,16 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             );
             println!(" -> lcp echo-reply {}", lcp.identifier);
 
+            Ok(())
+        }
+        LcpData::EchoReply(echo_reply) => {
+            // We don't ever send an Echo-Request
+            // so the Echo-Reply will always be unexpected.
+
+            println!(
+                " <- unexpected lcp echo-reply {}, magic number: {}, data: {:?}",
+                lcp.identifier, echo_reply.magic, echo_reply.data
+            );
             Ok(())
         }
         LcpData::DiscardRequest(discard_request) => {
