@@ -358,13 +358,6 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                     continue;
                 }
 
-                PppPkt::new_lcp(LcpPkt::new_configure_ack(
-                    lcp.identifier,
-                    configure_request.options,
-                ))
-                .serialize(&mut ctl_w)?;
-                ctl_w.flush()?;
-
                 let mut state = state.lock().expect("ppp state mutex is poisoned");
                 match *state {
                     Ppp::Synchronize(identifier, mru, magic_number) => {
@@ -372,11 +365,21 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                     }
                     Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
                     Ppp::SyncAcked => *state = Ppp::Auth(auth_proto),
-                    _ => println!(
-                        " <- unexpected lcp configure-req {}, mru: {}, authentication: {:?}",
-                        lcp.identifier, mru, auth_proto
-                    ),
+                    _ => {
+                        println!(
+                            " <- unexpected lcp configure-req {}, mru: {}, authentication: {:?}",
+                            lcp.identifier, mru, auth_proto
+                        );
+                        continue;
+                    }
                 }
+
+                PppPkt::new_lcp(LcpPkt::new_configure_ack(
+                    lcp.identifier,
+                    configure_request.options,
+                ))
+                .serialize(&mut ctl_w)?;
+                ctl_w.flush()?;
 
                 println!(" -> lcp configure-ack {}", lcp.identifier);
             }
