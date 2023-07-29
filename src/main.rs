@@ -364,7 +364,7 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                         *state = Ppp::SyncAck(identifier, mru, magic_number)
                     }
                     Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
-                    Ppp::SyncAcked => *state = Ppp::Auth(auth_proto),
+                    Ppp::SyncAcked => *state = Ppp::Auth(auth_proto.clone()),
                     _ => {
                         println!(
                             " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
@@ -381,6 +381,10 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
                 .serialize(&mut ctl_w)?;
                 ctl_w.flush()?;
 
+                println!(
+                    " <- lcp configure-request {}, mru: {}, authentication: {:?}",
+                    lcp.identifier, mru, auth_proto
+                );
                 println!(" -> lcp configure-ack {}", lcp.identifier);
             }
             LcpData::ConfigureAck(..) => {
