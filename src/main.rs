@@ -396,6 +396,7 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
     let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
+    let mut magic = 0;
     loop {
         if !ctl_r.fill_buf().map(|b| !b.is_empty())? {
             *state.lock().expect("ppp state mutex is poisoned") = Ppp::Terminated;
@@ -406,7 +407,7 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
         ppp.deserialize(&mut ctl_r)?;
 
         match ppp.data {
-            PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone())?,
+            PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
             _ => println!(" <- unhandled ppp {:?}", ppp),
         }
     }
@@ -414,7 +415,12 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     Ok(())
 }
 
-fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn handle_lcp(
+    lcp: LcpPkt,
+    ctl_w: &mut BufWriter<File>,
+    state: Arc<Mutex<Ppp>>,
+    magic: &mut u32,
+) -> Result<()> {
     match lcp.data {
         LcpData::ConfigureRequest(configure_request) => {
             let mru = configure_request
@@ -509,7 +515,19 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
 
             Ok(())
         }
-        LcpData::ConfigureAck(..) => {
+        LcpData::ConfigureAck(configure_ack) => {
+            let magic_number = configure_ack
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let LcpOpt::MagicNumber(magic_number) = opt.value {
+                        Some(magic_number)
+                    } else {
+                        None
+                    }
+                })
+                .expect("receive configure-ack without magic number");
+
             let mut state = state.lock().expect("ppp state mutex is poisoned");
             match *state {
                 Ppp::Synchronize(identifier, .., attempt) if lcp.identifier == identifier => {
@@ -523,6 +541,8 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
                     return Ok(());
                 }
             }
+
+            *magic = magic_number;
 
             println!(" <- lcp configure-ack {}", lcp.identifier);
             Ok(())
@@ -648,7 +668,7 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
         LcpData::EchoRequest(echo_request) => {
             PppPkt::new_lcp(LcpPkt::new_echo_reply(
                 lcp.identifier,
-                echo_request.magic,
+                *magic,
                 echo_request.data.clone(),
             ))
             .serialize(ctl_w)?;
