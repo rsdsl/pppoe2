@@ -216,15 +216,17 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
     });
 
     loop {
-        let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
-        match *ppp_state {
-            Ppp::Synchronize => {}
-            Ppp::Active => {}
-            Ppp::Err => {
-                return Err(recv_sess
-                    .join()
-                    .expect("recv_session panic")
-                    .expect_err("Ppp::Err state entered without an error"));
+        {
+            let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
+            match *ppp_state {
+                Ppp::Synchronize => {}
+                Ppp::Active => {}
+                Ppp::Err => {
+                    return Err(recv_sess
+                        .join()
+                        .expect("recv_session panic")
+                        .expect_err("Ppp::Err state entered without an error"));
+                }
             }
         }
 
@@ -237,7 +239,7 @@ fn recv_session(ctl: File, _ppp: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
 
     loop {
         let mut pkt = PppPkt::default();
-        pkt.deserialize(&mut ctl_r).unwrap();
+        pkt.deserialize(&mut ctl_r)?;
 
         println!(" <- ppp lcp {:?}", pkt);
     }
