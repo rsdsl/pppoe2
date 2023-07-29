@@ -509,6 +509,55 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             println!(" <- lcp configure-ack {}", lcp.identifier);
             Ok(())
         }
+        LcpData::ConfigureNak(configure_nak) => {
+            let mut mru = configure_nak.options.iter().find_map(|opt| {
+                if let LcpOpt::Mru(mru) = opt.value {
+                    Some(mru)
+                } else {
+                    None
+                }
+            });
+            let magic_number = configure_nak.options.iter().find_map(|opt| {
+                if let LcpOpt::MagicNumber(magic_number) = opt.value {
+                    Some(magic_number)
+                } else {
+                    None
+                }
+            });
+
+            if let Some(inner) = mru {
+                if inner < 1492 {
+                    mru = None;
+                }
+            }
+
+            let mut state = state.lock().expect("ppp state mutex is poisoned");
+            match *state {
+                Ppp::Synchronize(identifier, old_mru, old_magic_number, attempt) => {
+                    *state = Ppp::Synchronize(
+                        identifier,
+                        mru.unwrap_or(old_mru),
+                        magic_number.unwrap_or(old_magic_number),
+                        attempt,
+                    )
+                }
+                Ppp::SyncAck(identifier, old_mru, old_magic_number, attempt) => {
+                    *state = Ppp::SyncAck(
+                        identifier,
+                        mru.unwrap_or(old_mru),
+                        magic_number.unwrap_or(old_magic_number),
+                        attempt,
+                    )
+                }
+                _ => {
+                    println!(" <- unexpected lcp configure-nak {}", lcp.identifier);
+                    return Ok(());
+                }
+            }
+
+            println!(" <- lcp configure-nak {}", lcp.identifier);
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
