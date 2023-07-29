@@ -627,6 +627,21 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             println!(" <- lcp terminate-ack {}", lcp.identifier);
             Ok(())
         }
+        LcpData::CodeReject(code_reject) => {
+            // Should never happen.
+            println!(
+                " <- lcp code-reject {}, packet: {:?}",
+                lcp.identifier, code_reject.pkt
+            );
+            Ok(())
+        }
+        LcpData::DiscardRequest(discard_request) => {
+            println!(
+                " <- lcp discard-request {}, magic number: {}, data: {:?}",
+                lcp.identifier, discard_request.magic, discard_request.data
+            );
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
