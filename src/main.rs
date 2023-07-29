@@ -16,7 +16,7 @@ use socket2::Socket;
 const PPPOE_UPLINK: &str = "eth1";
 const MAX_ATTEMPTS: usize = 10;
 
-static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(8);
+static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(3);
 static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
 
 fn main() -> Result<()> {
