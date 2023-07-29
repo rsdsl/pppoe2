@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use ppproperly::{
-    Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PppData, PppPkt, PppoeData, PppoePkt, PppoeVal,
-    Serialize,
+    AuthProto, Deserialize, LcpData, LcpOpt, LcpPkt, MacAddr, PapPkt, PppData, PppPkt, PppoeData,
+    PppoePkt, PppoeVal, Serialize,
 };
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ppp, Pppoe, Result};
@@ -14,6 +14,9 @@ use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
 use socket2::Socket;
 
 const PPPOE_UPLINK: &str = "eth1";
+const USERNAME: &str = "foo";
+const PASSWORD: &str = "bar";
+
 const MAX_ATTEMPTS: usize = 10;
 const MAX_STATUS_ATTEMPTS: usize = 2;
 
@@ -330,7 +333,34 @@ fn session(
 
                     *ppp_state = Ppp::SyncAcked(attempt + 1);
                 }
-                Ppp::Auth(_) => {}
+                Ppp::Auth(ref auth_proto, attempt) => {
+                    if attempt >= MAX_ATTEMPTS {
+                        *ppp_state = Ppp::Terminate(
+                            "Maximum number of authentication attempts exceeded".into(),
+                            0,
+                        );
+                        continue;
+                    }
+
+                    match auth_proto {
+                        None => {
+                            *ppp_state = Ppp::Active;
+                            continue;
+                        }
+                        Some(AuthProto::Pap) => {
+                            PppPkt::new_pap(PapPkt::new_authenticate_request(
+                                rand::random(),
+                                USERNAME.into(),
+                                PASSWORD.into(),
+                            ))
+                            .serialize(&mut ctl_w)?;
+                            ctl_w.flush()?;
+                        }
+                        Some(AuthProto::Chap(_)) => {} // Packet handler takes care of this.
+                    }
+
+                    *ppp_state = Ppp::Auth(auth_proto.clone(), attempt + 1);
+                }
                 Ppp::Active => {}
                 Ppp::Terminate(ref reason, attempt) => {
                     if attempt >= MAX_ATTEMPTS {
@@ -492,7 +522,7 @@ fn handle_lcp(
                     *state = Ppp::SyncAck(identifier, mru, None, magic_number, attempt)
                 }
                 Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
-                Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone()),
+                Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone(), 0),
                 _ => {
                     println!(
                         " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
@@ -536,7 +566,7 @@ fn handle_lcp(
                     *state = Ppp::SyncAcked(attempt)
                 }
                 Ppp::SyncAck(identifier, _, ref auth_proto, ..) if lcp.identifier == identifier => {
-                    *state = Ppp::Auth(auth_proto.clone())
+                    *state = Ppp::Auth(auth_proto.clone(), 0)
                 }
                 _ => {
                     println!(" <- unexpected lcp configure-ack {}", lcp.identifier);

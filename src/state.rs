@@ -19,7 +19,7 @@ pub enum Ppp {
     Synchronize(u8, u16, u32, usize),
     SyncAck(u8, u16, Option<AuthProto>, u32, usize),
     SyncAcked(usize),
-    Auth(Option<AuthProto>),
+    Auth(Option<AuthProto>, usize),
     Active,
     Terminate(Vec<u8>, usize),
     Terminate2(String),
