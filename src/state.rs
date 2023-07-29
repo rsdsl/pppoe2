@@ -17,7 +17,9 @@ impl Default for Pppoe {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Ppp {
     Synchronize,
+    Auth,
     Active,
+    Terminated,
     Err,
 }
 

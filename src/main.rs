@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -220,7 +220,11 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
             let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
             match *ppp_state {
                 Ppp::Synchronize => {}
+                Ppp::Auth => {}
                 Ppp::Active => {}
+                Ppp::Terminated => {
+                    break;
+                }
                 Ppp::Err => {
                     return Err(recv_sess
                         .join()
@@ -232,15 +236,24 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
 
         thread::sleep(PPPOE_XMIT_INTERVAL);
     }
+
+    Ok(())
 }
 
 fn recv_session(ctl: File, _ppp: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl);
 
     loop {
+        if !ctl_r.fill_buf().map(|b| !b.is_empty())? {
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Terminated;
+            break;
+        }
+
         let mut pkt = PppPkt::default();
         pkt.deserialize(&mut ctl_r)?;
 
         println!(" <- ppp lcp {:?}", pkt);
     }
+
+    Ok(())
 }
