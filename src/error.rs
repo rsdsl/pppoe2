@@ -14,6 +14,8 @@ pub enum Error {
     RsdslNetlinkd(#[from] rsdsl_netlinkd::error::Error),
     #[error("rsdsl_pppoe2_sys: {0}")]
     RsdslPppoe2Sys(#[from] rsdsl_pppoe2_sys::Error),
+    #[error("serde_json: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

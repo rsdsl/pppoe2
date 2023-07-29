@@ -779,6 +779,8 @@ dependencies = [
  "rsdsl_ip_config",
  "rsdsl_netlinkd",
  "rsdsl_pppoe2_sys",
+ "serde",
+ "serde_json",
  "socket2 0.5.3",
  "thiserror",
 ]

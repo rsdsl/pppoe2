@@ -15,11 +15,10 @@ use rsdsl_ip_config::{Ipv4Config, Ipv6Config};
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ncp, Ppp, Pppoe, Result};
 use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
+use serde::{Deserialize as SDeserialize, Serialize as SSerialize};
 use socket2::Socket;
 
 const PPPOE_UPLINK: &str = "eth1";
-const USERNAME: &str = "foo";
-const PASSWORD: &str = "bar";
 
 const MAX_ATTEMPTS: usize = 10;
 const MAX_STATUS_ATTEMPTS: usize = 2;
@@ -31,6 +30,12 @@ static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
 enum Network {
     Ipv4,
     Ipv6,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, SSerialize, SDeserialize)]
+struct Config {
+    username: String,
+    password: String,
 }
 
 fn ifid(addr: Ipv6Addr) -> u64 {
@@ -264,6 +269,9 @@ fn session(
     pppoe_state: Arc<Mutex<Pppoe>>,
     session_id: u16,
 ) -> Result<()> {
+    let mut file = File::open("/data/pppoe.conf")?;
+    let config: Config = serde_json::from_reader(&mut file)?;
+
     let mut sock_disc_w = BufWriter::with_capacity(1500, sock_disc);
 
     let (_sock_sess, ctl, ppp) = new_session(interface, remote_mac, session_id)?;
@@ -396,8 +404,8 @@ fn session(
                         Some(AuthProto::Pap) => {
                             PppPkt::new_pap(PapPkt::new_authenticate_request(
                                 rand::random(),
-                                USERNAME.into(),
-                                PASSWORD.into(),
+                                config.username.clone(),
+                                config.password.clone(),
                             ))
                             .serialize(&mut ctl_w)?;
                             ctl_w.flush()?;
@@ -904,6 +912,9 @@ fn handle_pap(pap: PapPkt, state: Arc<Mutex<Ppp>>) -> Result<()> {
 }
 
 fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    let mut file = File::open("/data/pppoe.conf")?;
+    let config: Config = serde_json::from_reader(&mut file)?;
+
     let algorithm = match *state.lock().expect("ppp state mutex is poisoned") {
         Ppp::Auth(Some(AuthProto::Chap(algo)), ..) => algo,
         _ => {
@@ -917,7 +928,7 @@ fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>
             let mut hash_input = Vec::new();
 
             hash_input.push(chap.identifier);
-            hash_input.extend_from_slice(PASSWORD.as_bytes());
+            hash_input.extend_from_slice(config.password.as_bytes());
             hash_input.extend_from_slice(&chap_challenge.value);
 
             let challenge_hash = match algorithm {
@@ -927,7 +938,7 @@ fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>
             PppPkt::new_chap(ChapPkt::new_response(
                 chap.identifier,
                 challenge_hash.to_vec(),
-                USERNAME.into(),
+                config.username.clone(),
             ))
             .serialize(ctl_w)?;
             ctl_w.flush()?;
@@ -938,7 +949,7 @@ fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>
             );
             println!(
                 " -> chap response {}, name: {}, value: {:?}",
-                chap.identifier, USERNAME, challenge_hash
+                chap.identifier, config.username, challenge_hash
             );
 
             Ok(())
