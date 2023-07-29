@@ -1,4 +1,4 @@
-use ppproperly::MacAddr;
+use ppproperly::{AuthProto, MacAddr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Pppoe {
@@ -16,8 +16,8 @@ impl Default for Pppoe {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Ppp {
-    Synchronize,
-    Auth,
+    Synchronize(u8, u16, u32),
+    Auth(AuthProto),
     Active,
     Terminated,
     Err,
@@ -25,6 +25,6 @@ pub enum Ppp {
 
 impl Default for Ppp {
     fn default() -> Self {
-        Self::Synchronize
+        Self::Synchronize(1, 1492, rand::random())
     }
 }

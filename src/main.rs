@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use ppproperly::{Deserialize, MacAddr, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize};
+use ppproperly::{
+    Deserialize, LcpOpt, LcpPkt, MacAddr, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
+};
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ppp, Pppoe, Result};
 use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
@@ -203,6 +205,7 @@ fn recv_discovery(interface: &str, sock: Socket, state: Arc<Mutex<Pppoe>>) -> Re
 
 fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> {
     let (_sock_sess, ctl, ppp) = new_session(interface, remote_mac, session_id)?;
+    let mut ctl_w = BufWriter::with_capacity(1500, ctl.try_clone()?);
 
     let ppp_state = Arc::new(Mutex::new(Ppp::default()));
 
@@ -219,8 +222,23 @@ fn session(interface: &str, remote_mac: MacAddr, session_id: u16) -> Result<()> 
         {
             let ppp_state = ppp_state.lock().expect("ppp state mutex is poisoned");
             match *ppp_state {
-                Ppp::Synchronize => {}
-                Ppp::Auth => {}
+                Ppp::Synchronize(identifier, mru, magic_number) => {
+                    PppPkt::new_lcp(LcpPkt::new_configure_request(
+                        identifier,
+                        vec![
+                            LcpOpt::Mru(mru).into(),
+                            LcpOpt::MagicNumber(magic_number).into(),
+                        ],
+                    ))
+                    .serialize(&mut ctl_w)?;
+                    ctl_w.flush()?;
+
+                    println!(
+                        " -> lcp configure-req {}, mru: {}, magic number: {}",
+                        identifier, mru, magic_number
+                    );
+                }
+                Ppp::Auth(_) => {}
                 Ppp::Active => {}
                 Ppp::Terminated => {
                     break;
