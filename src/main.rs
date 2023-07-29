@@ -561,6 +561,18 @@ fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) 
             println!(" <- lcp configure-nak {}", lcp.identifier);
             Ok(())
         }
+        LcpData::ConfigureReject(..) => {
+            // None of our options can be unset.
+            // Ignore the packet and let the negotiation time out.
+
+            match *state.lock().expect("ppp state mutex is poisoned") {
+                Ppp::Synchronize(..) => println!(" <- lcp configure-reject {}", lcp.identifier),
+                Ppp::SyncAck(..) => println!(" <- lcp configure-reject {}", lcp.identifier),
+                _ => println!(" <- unexpected lcp configure-reject {}", lcp.identifier),
+            }
+
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
