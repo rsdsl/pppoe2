@@ -390,121 +390,125 @@ fn recv_lcp(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
         let mut ppp = PppPkt::default();
         ppp.deserialize(&mut ctl_r)?;
 
-        let lcp = if let PppData::Lcp(lcp) = ppp.data {
-            lcp
-        } else {
-            unreachable!();
-        };
-
-        match lcp.data {
-            LcpData::ConfigureRequest(configure_request) => {
-                let mru = configure_request
-                    .options
-                    .iter()
-                    .find_map(|opt| {
-                        if let LcpOpt::Mru(mru) = opt.value {
-                            Some(mru)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(1500);
-                let auth_proto = configure_request.options.iter().find_map(|opt| {
-                    if let LcpOpt::AuthenticationProtocol(auth_proto) = &opt.value {
-                        Some(auth_proto.protocol.clone())
-                    } else {
-                        None
-                    }
-                });
-                let pfc = configure_request
-                    .options
-                    .iter()
-                    .any(|opt| opt.value == LcpOpt::ProtocolFieldCompression);
-                let acfc = configure_request
-                    .options
-                    .iter()
-                    .any(|opt| opt.value == LcpOpt::AddrCtlFieldCompression);
-
-                if mru < 1492 {
-                    PppPkt::new_lcp(LcpPkt::new_configure_nak(
-                        lcp.identifier,
-                        vec![LcpOpt::Mru(1492).into()],
-                    ))
-                    .serialize(&mut ctl_w)?;
-                    ctl_w.flush()?;
-
-                    println!(
-                        " -> lcp configure-nak {}, mru: {} -> 1492",
-                        lcp.identifier, mru
-                    );
-                    continue;
-                }
-                if pfc || acfc {
-                    let mut reject = Vec::new();
-                    if pfc {
-                        reject.push(LcpOpt::ProtocolFieldCompression.into());
-                    }
-                    if acfc {
-                        reject.push(LcpOpt::AddrCtlFieldCompression.into());
-                    }
-
-                    PppPkt::new_lcp(LcpPkt::new_configure_reject(lcp.identifier, reject))
-                        .serialize(&mut ctl_w)?;
-                    ctl_w.flush()?;
-
-                    println!(
-                        " -> lcp configure-reject {}, pfc: {} -> false, acfc: {} -> false",
-                        lcp.identifier, pfc, acfc
-                    );
-                    continue;
-                }
-
-                let mut state = state.lock().expect("ppp state mutex is poisoned");
-                match *state {
-                    Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
-                        *state = Ppp::SyncAck(identifier, mru, magic_number, attempt)
-                    }
-                    Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
-                    Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone()),
-                    _ => {
-                        println!(
-                            " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
-                            lcp.identifier, mru, auth_proto
-                        );
-                        continue;
-                    }
-                }
-
-                PppPkt::new_lcp(LcpPkt::new_configure_ack(
-                    lcp.identifier,
-                    configure_request.options,
-                ))
-                .serialize(&mut ctl_w)?;
-                ctl_w.flush()?;
-
-                println!(
-                    " <- lcp configure-request {}, mru: {}, authentication: {:?}",
-                    lcp.identifier, mru, auth_proto
-                );
-                println!(" -> lcp configure-ack {}", lcp.identifier);
-            }
-            LcpData::ConfigureAck(..) => {
-                let mut state = state.lock().expect("ppp state mutex is poisoned");
-                match *state {
-                    Ppp::Synchronize(identifier, .., attempt) if lcp.identifier == identifier => {
-                        *state = Ppp::SyncAcked(attempt)
-                    }
-                    Ppp::SyncAck(identifier, .., attempt) if lcp.identifier == identifier => {
-                        *state = Ppp::SyncAcked(attempt)
-                    }
-                    _ => println!(" <- unexpected lcp configure-ack {}", lcp.identifier),
-                }
-
-                println!(" <- lcp configure-ack {}", lcp.identifier);
-            }
-            _ => {}
+        match ppp.data {
+            PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone())?,
+            _ => println!(" <- unhandled ppp {:?}", ppp),
         }
     }
 
     Ok(())
+}
+
+fn handle_lcp(lcp: LcpPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>>) -> Result<()> {
+    match lcp.data {
+        LcpData::ConfigureRequest(configure_request) => {
+            let mru = configure_request
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let LcpOpt::Mru(mru) = opt.value {
+                        Some(mru)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(1500);
+            let auth_proto = configure_request.options.iter().find_map(|opt| {
+                if let LcpOpt::AuthenticationProtocol(auth_proto) = &opt.value {
+                    Some(auth_proto.protocol.clone())
+                } else {
+                    None
+                }
+            });
+            let pfc = configure_request
+                .options
+                .iter()
+                .any(|opt| opt.value == LcpOpt::ProtocolFieldCompression);
+            let acfc = configure_request
+                .options
+                .iter()
+                .any(|opt| opt.value == LcpOpt::AddrCtlFieldCompression);
+
+            if mru < 1492 {
+                PppPkt::new_lcp(LcpPkt::new_configure_nak(
+                    lcp.identifier,
+                    vec![LcpOpt::Mru(1492).into()],
+                ))
+                .serialize(ctl_w)?;
+                ctl_w.flush()?;
+
+                println!(
+                    " -> lcp configure-nak {}, mru: {} -> 1492",
+                    lcp.identifier, mru
+                );
+                return Ok(());
+            }
+            if pfc || acfc {
+                let mut reject = Vec::new();
+                if pfc {
+                    reject.push(LcpOpt::ProtocolFieldCompression.into());
+                }
+                if acfc {
+                    reject.push(LcpOpt::AddrCtlFieldCompression.into());
+                }
+
+                PppPkt::new_lcp(LcpPkt::new_configure_reject(lcp.identifier, reject))
+                    .serialize(ctl_w)?;
+                ctl_w.flush()?;
+
+                println!(
+                    " -> lcp configure-reject {}, pfc: {} -> false, acfc: {} -> false",
+                    lcp.identifier, pfc, acfc
+                );
+                return Ok(());
+            }
+
+            let mut state = state.lock().expect("ppp state mutex is poisoned");
+            match *state {
+                Ppp::Synchronize(identifier, mru, magic_number, attempt) => {
+                    *state = Ppp::SyncAck(identifier, mru, magic_number, attempt)
+                }
+                Ppp::SyncAck(..) => {} // Simply retransmit our previous ack.
+                Ppp::SyncAcked(..) => *state = Ppp::Auth(auth_proto.clone()),
+                _ => {
+                    println!(
+                        " <- unexpected lcp configure-request {}, mru: {}, authentication: {:?}",
+                        lcp.identifier, mru, auth_proto
+                    );
+                    return Ok(());
+                }
+            }
+
+            PppPkt::new_lcp(LcpPkt::new_configure_ack(
+                lcp.identifier,
+                configure_request.options,
+            ))
+            .serialize(ctl_w)?;
+            ctl_w.flush()?;
+
+            println!(
+                " <- lcp configure-request {}, mru: {}, authentication: {:?}",
+                lcp.identifier, mru, auth_proto
+            );
+            println!(" -> lcp configure-ack {}", lcp.identifier);
+
+            Ok(())
+        }
+        LcpData::ConfigureAck(..) => {
+            let mut state = state.lock().expect("ppp state mutex is poisoned");
+            match *state {
+                Ppp::Synchronize(identifier, .., attempt) if lcp.identifier == identifier => {
+                    *state = Ppp::SyncAcked(attempt)
+                }
+                Ppp::SyncAck(identifier, .., attempt) if lcp.identifier == identifier => {
+                    *state = Ppp::SyncAcked(attempt)
+                }
+                _ => println!(" <- unexpected lcp configure-ack {}", lcp.identifier),
+            }
+
+            println!(" <- lcp configure-ack {}", lcp.identifier);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
