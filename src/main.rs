@@ -475,28 +475,62 @@ fn session(
                                 }
                             };
                         } else if *state == Ncp::Active {
+                            let mut update = false;
+
                             match *ncp {
                                 Network::Ipv4 if !ipv4_active => {
-                                    write_dsconfig(config4.clone(), config6.clone())?;
                                     ipv4_active = true;
+                                    update = true;
                                 }
                                 Network::Ipv6 if !ipv6_active => {
-                                    write_dsconfig(config4.clone(), config6.clone())?;
                                     ipv6_active = true;
+                                    update = true;
                                 }
                                 _ => {}
                             }
+
+                            if update {
+                                write_dsconfig(
+                                    if ipv4_active {
+                                        config4.clone()
+                                    } else {
+                                        Arc::new(Mutex::new(Ipv4Config::default()))
+                                    },
+                                    if ipv6_active {
+                                        config6.clone()
+                                    } else {
+                                        Arc::new(Mutex::new(Ipv6Config::default()))
+                                    },
+                                )?;
+                            }
                         } else if *state == Ncp::Failed {
+                            let mut update = false;
+
                             match *ncp {
                                 Network::Ipv4 if ipv4_active => {
-                                    write_dsconfig(config4.clone(), config6.clone())?;
                                     ipv4_active = false;
+                                    update = true;
                                 }
                                 Network::Ipv6 if ipv6_active => {
-                                    write_dsconfig(config4.clone(), config6.clone())?;
                                     ipv6_active = false;
+                                    update = true;
                                 }
                                 _ => {}
+                            }
+
+                            if update {
+                                write_dsconfig(
+                                    if ipv4_active {
+                                        config4.clone()
+                                    } else {
+                                        Arc::new(Mutex::new(Ipv4Config::default()))
+                                    },
+                                    if ipv6_active {
+                                        config6.clone()
+                                    } else {
+                                        Arc::new(Mutex::new(Ipv6Config::default()))
+                                    },
+                                )?;
                             }
                         }
                     }
