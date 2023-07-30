@@ -9,7 +9,7 @@ use std::time::Duration;
 use ppproperly::{
     AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, IpcpData, IpcpOpt, IpcpPkt,
     Ipv6cpData, Ipv6cpOpt, Ipv6cpPkt, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData,
-    PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
+    PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize, IPCP, IPV6CP,
 };
 use rsdsl_ip_config::{DsConfig, Ipv4Config, Ipv6Config};
 use rsdsl_netlinkd::link;
@@ -326,13 +326,17 @@ fn session(
 
     let ctl2 = ctl.try_clone()?;
     let ppp_state2 = ppp_state.clone();
-    let recv_link_handle = thread::spawn(move || match recv_link(ctl2, ppp_state2.clone()) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
-            Err(e)
-        }
-    });
+    let ncp_states2 = ncp_states.clone();
+    let recv_link_handle =
+        thread::spawn(
+            move || match recv_link(ctl2, ppp_state2.clone(), ncp_states2) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    *ppp_state2.lock().expect("ppp state mutex is poisoned") = Ppp::Err;
+                    Err(e)
+                }
+            },
+        );
 
     let ppp_state2 = ppp_state.clone();
     let ncp_states2 = ncp_states.clone();
@@ -595,7 +599,11 @@ fn session(
     Ok(())
 }
 
-fn recv_link(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
+fn recv_link(
+    ctl: File,
+    state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
+) -> Result<()> {
     let mut ctl_r = BufReader::with_capacity(1500, ctl.try_clone()?);
     let mut ctl_w = BufWriter::with_capacity(1500, ctl);
 
@@ -610,7 +618,13 @@ fn recv_link(ctl: File, state: Arc<Mutex<Ppp>>) -> Result<()> {
         ppp.deserialize(&mut ctl_r)?;
 
         match ppp.data {
-            PppData::Lcp(lcp) => handle_lcp(lcp, &mut ctl_w, state.clone(), &mut magic)?,
+            PppData::Lcp(lcp) => handle_lcp(
+                lcp,
+                &mut ctl_w,
+                state.clone(),
+                ncp_states.clone(),
+                &mut magic,
+            )?,
             PppData::Pap(pap) => handle_pap(pap, state.clone())?,
             PppData::Chap(chap) => handle_chap(chap, &mut ctl_w, state.clone())?,
             _ => println!(" <- unsupported ppp pkt {:?}", ppp),
@@ -665,6 +679,7 @@ fn handle_lcp(
     lcp: LcpPkt,
     ctl_w: &mut BufWriter<File>,
     state: Arc<Mutex<Ppp>>,
+    ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     magic: &mut u32,
 ) -> Result<()> {
     match lcp.data {
@@ -905,8 +920,23 @@ fn handle_lcp(
             Ok(())
         }
         LcpData::ProtocolReject(protocol_reject) => {
-            // We're just going to ignore this
-            // and wait for a timeout on the NCP level instead.
+            match protocol_reject.protocol {
+                IPCP => {
+                    *ncp_states
+                        .lock()
+                        .expect("ncp state mutex is poisoned")
+                        .get_mut(&Network::Ipv4)
+                        .expect("no ipv4 state") = Ncp::Failed
+                }
+                IPV6CP => {
+                    *ncp_states
+                        .lock()
+                        .expect("ncp state mutex is poisoned")
+                        .get_mut(&Network::Ipv6)
+                        .expect("no ipv6 state") = Ncp::Failed
+                }
+                _ => {}
+            }
 
             println!(
                 " <- lcp protocol-reject {}, protocol: {}, packet: {:?}",
