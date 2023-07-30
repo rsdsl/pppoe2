@@ -136,7 +136,7 @@ fn connect(interface: &str) -> Result<()> {
                     println!(" -> [{}] padr {}/{}", remote_mac, attempt, MAX_ATTEMPTS);
                     *pppoe_state = Pppoe::Request(remote_mac, ac_cookie.to_owned(), attempt + 1);
                 }
-                Pppoe::Active(_) => {}
+                Pppoe::Active(..) => {}
                 Pppoe::Err => {
                     return Err(recv_disc
                         .join()
@@ -170,9 +170,17 @@ fn recv_discovery(
                     continue;
                 }
             }
-            Pppoe::Active(remote_mac) => {
+            Pppoe::Active(remote_mac, session_id) => {
                 if pkt.src_mac != remote_mac {
                     println!(" <- [{}] unexpected mac, pkt: {:?}", pkt.src_mac, pkt);
+                    continue;
+                }
+
+                if pkt.session_id != session_id {
+                    println!(
+                        " <- [{}] wrong session id {}, pkt: {:?}",
+                        pkt.src_mac, pkt.session_id, pkt
+                    );
                     continue;
                 }
             }
@@ -249,7 +257,7 @@ fn recv_discovery(
                         }
                     });
 
-                    *state = Pppoe::Active(pkt.src_mac);
+                    *state = Pppoe::Active(pkt.src_mac, pkt.session_id);
                     println!(" <- [{}] pads, session id: {}", pkt.src_mac, pkt.session_id);
                 } else {
                     println!(
@@ -272,7 +280,7 @@ fn recv_discovery(
                     .unwrap_or(String::new());
 
                 let mut state = state.lock().expect("pppoe state mutex is poisoned");
-                if let Pppoe::Active(_) = *state {
+                if let Pppoe::Active(..) = *state {
                     *state = Pppoe::Init;
                 }
 

@@ -5,7 +5,7 @@ pub enum Pppoe {
     #[default]
     Init,
     Request(MacAddr, Option<Vec<u8>>, usize),
-    Active(MacAddr),
+    Active(MacAddr, u16),
     Err,
 }
 
