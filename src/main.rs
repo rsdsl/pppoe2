@@ -11,7 +11,7 @@ use ppproperly::{
     Ipv6cpData, Ipv6cpOpt, Ipv6cpPkt, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData,
     PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize,
 };
-use rsdsl_ip_config::{Ipv4Config, Ipv6Config};
+use rsdsl_ip_config::{DsConfig, Ipv4Config, Ipv6Config};
 use rsdsl_netlinkd::link;
 use rsdsl_pppoe2::{Ncp, Ppp, Pppoe, Result};
 use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
@@ -44,6 +44,28 @@ fn ifid(addr: Ipv6Addr) -> u64 {
 
 fn ll(if_id: u64) -> Ipv6Addr {
     ((0xfe80 << 112) | if_id as u128).into()
+}
+
+fn write_dsconfig(config4: Arc<Mutex<Ipv4Config>>, config6: Arc<Mutex<Ipv6Config>>) -> Result<()> {
+    let config4 = config4.lock().expect("ipv4 config mutex is poisoned");
+    let config6 = config6.lock().expect("ipv6 config mutex is poisoned");
+
+    let dsconfig = DsConfig {
+        v4: match config4.addr {
+            Ipv4Addr::UNSPECIFIED => None,
+            _ => Some(*config4),
+        },
+        v6: match config6.laddr {
+            Ipv6Addr::UNSPECIFIED => None,
+            _ => Some(*config6),
+        },
+    };
+
+    let mut file = File::create(rsdsl_ip_config::LOCATION)?;
+    serde_json::to_writer_pretty(&mut file, &dsconfig)?;
+
+    println!("<-> write ds config to {}", rsdsl_ip_config::LOCATION);
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -291,6 +313,9 @@ fn session(
     let config4 = Arc::new(Mutex::new(Ipv4Config::default()));
     let config6 = Arc::new(Mutex::new(Ipv6Config::default()));
 
+    let mut ipv4_active = false;
+    let mut ipv6_active = false;
+
     let ctl2 = ctl.try_clone()?;
     let ppp_state2 = ppp_state.clone();
     let recv_link_handle = thread::spawn(move || match recv_link(ctl2, ppp_state2.clone()) {
@@ -433,7 +458,9 @@ fn session(
                                             eprintln!("{}", e);
                                             Err(e)
                                         }
-                                    })
+                                    });
+
+                                    ipv4_active = false;
                                 }
                                 Network::Ipv6 => {
                                     thread::spawn(|| match ipv6cp(ctl2, ncp_states2, config62) {
@@ -442,9 +469,35 @@ fn session(
                                             eprintln!("{}", e);
                                             Err(e)
                                         }
-                                    })
+                                    });
+
+                                    ipv6_active = false;
                                 }
                             };
+                        } else if *state == Ncp::Active {
+                            match *ncp {
+                                Network::Ipv4 if !ipv4_active => {
+                                    write_dsconfig(config4.clone(), config6.clone())?;
+                                    ipv4_active = true;
+                                }
+                                Network::Ipv6 if !ipv6_active => {
+                                    write_dsconfig(config4.clone(), config6.clone())?;
+                                    ipv6_active = true;
+                                }
+                                _ => {}
+                            }
+                        } else if *state == Ncp::Failed {
+                            match *ncp {
+                                Network::Ipv4 if ipv4_active => {
+                                    write_dsconfig(config4.clone(), config6.clone())?;
+                                    ipv4_active = false;
+                                }
+                                Network::Ipv6 if ipv6_active => {
+                                    write_dsconfig(config4.clone(), config6.clone())?;
+                                    ipv6_active = false;
+                                }
+                                _ => {}
+                            }
                         }
                     }
                 }
