@@ -502,8 +502,6 @@ fn session(
                                         Arc::new(Mutex::new(Ipv6Config::default()))
                                     },
                                 )?;
-
-                                break;
                             }
                         } else if *state == Ncp::Failed {
                             let mut update = false;
@@ -533,8 +531,6 @@ fn session(
                                         Arc::new(Mutex::new(Ipv6Config::default()))
                                     },
                                 )?;
-
-                                break;
                             }
                         }
                     }
