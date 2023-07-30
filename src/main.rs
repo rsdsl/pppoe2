@@ -905,7 +905,8 @@ fn handle_lcp(
             Ok(())
         }
         LcpData::ProtocolReject(protocol_reject) => {
-            // TODO: update ncp state to failed
+            // We're just going to ignore this
+            // and wait for a timeout on the NCP level instead.
 
             println!(
                 " <- lcp protocol-reject {}, protocol: {}, packet: {:?}",
