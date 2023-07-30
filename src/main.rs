@@ -1069,7 +1069,11 @@ fn ipcp(
 
                     PppPkt::new_ipcp(IpcpPkt::new_configure_request(
                         identifier,
-                        vec![IpcpOpt::IpAddr(config.addr.into()).into()],
+                        vec![
+                            IpcpOpt::IpAddr(config.addr.into()).into(),
+                            IpcpOpt::PrimaryDns(config.dns1.into()).into(),
+                            IpcpOpt::SecondaryDns(config.dns2.into()).into(),
+                        ],
                     ))
                     .serialize(&mut ctl_w)?;
                     ctl_w.flush()?;
@@ -1078,8 +1082,8 @@ fn ipcp(
                         Ncp::Configure(identifier, attempt + 1);
 
                     println!(
-                        " -> ipcp configure-request {}/{}, address: {}",
-                        attempt, MAX_ATTEMPTS, config.addr
+                        " -> ipcp configure-request {}/{}, address: {}, dns1: {}, dns2: {}",
+                        attempt, MAX_ATTEMPTS, config.addr, config.dns1, config.dns2
                     );
                 }
                 Ncp::ConfAck(identifier, attempt) => {
@@ -1090,7 +1094,11 @@ fn ipcp(
 
                     PppPkt::new_ipcp(IpcpPkt::new_configure_request(
                         identifier,
-                        vec![IpcpOpt::IpAddr(config.addr.into()).into()],
+                        vec![
+                            IpcpOpt::IpAddr(config.addr.into()).into(),
+                            IpcpOpt::PrimaryDns(config.dns1.into()).into(),
+                            IpcpOpt::SecondaryDns(config.dns2.into()).into(),
+                        ],
                     ))
                     .serialize(&mut ctl_w)?;
                     ctl_w.flush()?;
@@ -1099,8 +1107,8 @@ fn ipcp(
                         Ncp::ConfAck(identifier, attempt + 1);
 
                     println!(
-                        " -> ipcp configure-request {}/{}, address: {}",
-                        attempt, MAX_ATTEMPTS, config.addr
+                        " -> ipcp configure-request {}/{}, address: {}, dns1: {}, dns2: {}",
+                        attempt, MAX_ATTEMPTS, config.addr, config.dns1, config.dns2
                     );
                 }
                 Ncp::ConfAcked(attempt) => {
@@ -1306,6 +1314,8 @@ fn handle_ipcp(
             Ok(())
         }
         IpcpData::ConfigureNak(configure_nak) => {
+            let mut config = config.lock().expect("ipv4 config mutex is poisoned");
+
             let addr = configure_nak
                 .options
                 .iter()
@@ -1317,6 +1327,28 @@ fn handle_ipcp(
                     }
                 })
                 .expect("receive ipcp configure-nak without ipv4 address");
+            let dns1 = configure_nak
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let IpcpOpt::PrimaryDns(dns1) = &opt.value {
+                        Some(dns1.0)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(config.dns1);
+            let dns2 = configure_nak
+                .options
+                .iter()
+                .find_map(|opt| {
+                    if let IpcpOpt::SecondaryDns(dns2) = &opt.value {
+                        Some(dns2.0)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(config.dns2);
 
             match ncp_states.lock().expect("ncp state mutex is poisoned")[&Network::Ipv4] {
                 Ncp::Configure(identifier, ..) if ipcp.identifier == identifier => {}
@@ -1327,19 +1359,25 @@ fn handle_ipcp(
                 }
             }
 
-            config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
+            config.addr = addr;
+            config.dns1 = dns1;
+            config.dns2 = dns2;
 
             PppPkt::new_ipcp(IpcpPkt::new_configure_request(
                 ipcp.identifier,
-                vec![IpcpOpt::IpAddr(addr.into()).into()],
+                vec![
+                    IpcpOpt::IpAddr(addr.into()).into(),
+                    IpcpOpt::PrimaryDns(dns1.into()).into(),
+                    IpcpOpt::SecondaryDns(dns2.into()).into(),
+                ],
             ))
             .serialize(ppp_w)?;
             ppp_w.flush()?;
 
             println!(" <- ipcp configure-nak {}", ipcp.identifier);
             println!(
-                " -> ipcp configure-request {}, address: {}",
-                ipcp.identifier, addr
+                " -> ipcp configure-request {}, address: {}, dns1: {}, dns2: {}",
+                ipcp.identifier, addr, dns1, dns2
             );
 
             Ok(())
