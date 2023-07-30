@@ -441,6 +441,8 @@ fn session(
                     *ppp_state = Ppp::Auth(auth_proto.clone(), attempt + 1);
                 }
                 Ppp::Active => {
+                    let mut update = false;
+
                     let mut ncps = ncp_states.lock().expect("ncp state mutex is poisoned");
                     for (ncp, state) in ncps.iter_mut() {
                         if *state == Ncp::Dead {
@@ -475,8 +477,6 @@ fn session(
                                 }
                             };
                         } else if *state == Ncp::Active {
-                            let mut update = false;
-
                             match *ncp {
                                 Network::Ipv4 if !ipv4_active => {
                                     ipv4_active = true;
@@ -488,24 +488,7 @@ fn session(
                                 }
                                 _ => {}
                             }
-
-                            if update {
-                                write_dsconfig(
-                                    if ipv4_active {
-                                        config4.clone()
-                                    } else {
-                                        Arc::new(Mutex::new(Ipv4Config::default()))
-                                    },
-                                    if ipv6_active {
-                                        config6.clone()
-                                    } else {
-                                        Arc::new(Mutex::new(Ipv6Config::default()))
-                                    },
-                                )?;
-                            }
                         } else if *state == Ncp::Failed {
-                            let mut update = false;
-
                             match *ncp {
                                 Network::Ipv4 if ipv4_active => {
                                     ipv4_active = false;
@@ -517,22 +500,22 @@ fn session(
                                 }
                                 _ => {}
                             }
-
-                            if update {
-                                write_dsconfig(
-                                    if ipv4_active {
-                                        config4.clone()
-                                    } else {
-                                        Arc::new(Mutex::new(Ipv4Config::default()))
-                                    },
-                                    if ipv6_active {
-                                        config6.clone()
-                                    } else {
-                                        Arc::new(Mutex::new(Ipv6Config::default()))
-                                    },
-                                )?;
-                            }
                         }
+                    }
+
+                    if update {
+                        write_dsconfig(
+                            if ipv4_active {
+                                config4.clone()
+                            } else {
+                                Arc::new(Mutex::new(Ipv4Config::default()))
+                            },
+                            if ipv6_active {
+                                config6.clone()
+                            } else {
+                                Arc::new(Mutex::new(Ipv6Config::default()))
+                            },
+                        )?;
                     }
                 }
                 Ppp::Terminate(ref reason, attempt) => {
