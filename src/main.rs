@@ -1280,19 +1280,7 @@ fn handle_ipcp(
 
             Ok(())
         }
-        IpcpData::ConfigureAck(configure_ack) => {
-            let addr = configure_ack
-                .options
-                .iter()
-                .find_map(|opt| {
-                    if let IpcpOpt::IpAddr(addr) = &opt.value {
-                        Some(addr.0)
-                    } else {
-                        None
-                    }
-                })
-                .expect("receive ipcp configure-ack without ipv4 address");
-
+        IpcpData::ConfigureAck(..) => {
             let mut ncp_states = ncp_states.lock().expect("ncp state mutex is poisoned");
             match ncp_states[&Network::Ipv4] {
                 Ncp::Configure(identifier, attempt) if ipcp.identifier == identifier => {
@@ -1307,8 +1295,6 @@ fn handle_ipcp(
                     return Ok(());
                 }
             }
-
-            config.lock().expect("ipv4 config mutex is poisoned").addr = addr;
 
             println!(" <- ipcp configure-ack {}", ipcp.identifier);
             Ok(())
