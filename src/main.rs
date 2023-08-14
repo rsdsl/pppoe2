@@ -18,7 +18,7 @@ use rsdsl_pppoe2_sys::{new_discovery_socket, new_session};
 use serde::{Deserialize as SDeserialize, Serialize as SSerialize};
 use socket2::Socket;
 
-const PPPOE_UPLINK: &str = "eth1";
+const PPPOE_UPLINK: &str = "eth0";
 
 const MAX_ATTEMPTS: usize = 10;
 const MAX_STATUS_ATTEMPTS: usize = 2;
