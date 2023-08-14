@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ppproperly::{AuthProto, MacAddr};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -15,7 +17,7 @@ pub enum Ppp {
     SyncAck(u8, u16, Option<AuthProto>, u32, usize),
     SyncAcked(usize),
     Auth(Option<AuthProto>, usize),
-    Active,
+    Active(Instant),
     Terminate(Vec<u8>, usize),
     Terminate2(String),
     Terminated,

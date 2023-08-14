@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ppproperly::{
     AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, IpcpData, IpcpOpt, IpcpPkt,
@@ -23,8 +23,9 @@ const PPPOE_UPLINK: &str = "eth1";
 const MAX_ATTEMPTS: usize = 10;
 const MAX_STATUS_ATTEMPTS: usize = 2;
 
-static PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(3);
-static SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
+const PPPOE_XMIT_INTERVAL: Duration = Duration::from_secs(3);
+const SESSION_INIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Network {
@@ -435,7 +436,7 @@ fn session(
 
                     match auth_proto {
                         None => {
-                            *ppp_state = Ppp::Active;
+                            *ppp_state = Ppp::Active(Instant::now());
                             continue;
                         }
                         Some(AuthProto::Pap) => {
@@ -452,7 +453,13 @@ fn session(
 
                     *ppp_state = Ppp::Auth(auth_proto.clone(), attempt + 1);
                 }
-                Ppp::Active => {
+                Ppp::Active(last_echo_req) => {
+                    if Instant::now().duration_since(last_echo_req) >= TIMEOUT {
+                        *ppp_state =
+                            Ppp::Terminate("No Echo-Requests received for too long".into(), 0);
+                        continue;
+                    }
+
                     let mut update = false;
 
                     let mut ncps = ncp_states.lock().expect("ncp state mutex is poisoned");
@@ -953,6 +960,11 @@ fn handle_lcp(
             .serialize(ctl_w)?;
             ctl_w.flush()?;
 
+            let mut state = state.lock().expect("ppp state mutex is poisoned");
+            if let Ppp::Active(..) = *state {
+                *state = Ppp::Active(Instant::now());
+            }
+
             println!(
                 " <- lcp echo-request {}, magic number: {}, data: {:?}",
                 lcp.identifier, echo_request.magic, echo_request.data
@@ -999,7 +1011,7 @@ fn handle_pap(pap: PapPkt, state: Arc<Mutex<Ppp>>) -> Result<()> {
             Ok(())
         }
         PapData::AuthenticateAck(authenticate_ack) => {
-            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active;
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active(Instant::now());
 
             println!(
                 " <- pap authenticate-ack {}, message: {}",
@@ -1074,7 +1086,7 @@ fn handle_chap(chap: ChapPkt, ctl_w: &mut BufWriter<File>, state: Arc<Mutex<Ppp>
             Ok(())
         }
         ChapData::Success(chap_success) => {
-            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active;
+            *state.lock().expect("ppp state mutex is poisoned") = Ppp::Active(Instant::now());
 
             println!(
                 " <- chap success {}, message: {}",
@@ -1277,9 +1289,12 @@ fn handle_ipcp(
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv4Config>>,
 ) -> Result<()> {
-    if *state.lock().expect("ppp state mutex is poisoned") != Ppp::Active {
-        println!(" <- unexpected ipcp");
-        return Ok(());
+    match *state.lock().expect("ppp state mutex is poisoned") {
+        Ppp::Active(..) => {}
+        _ => {
+            println!(" <- unexpected ipcp");
+            return Ok(());
+        }
     }
 
     match ipcp.data {
@@ -1487,9 +1502,12 @@ fn handle_ipv6cp(
     ncp_states: Arc<Mutex<HashMap<Network, Ncp>>>,
     config: Arc<Mutex<Ipv6Config>>,
 ) -> Result<()> {
-    if *state.lock().expect("ppp state mutex is poisoned") != Ppp::Active {
-        println!(" <- unexpected ipv6cp");
-        return Ok(());
+    match *state.lock().expect("ppp state mutex is poisoned") {
+        Ppp::Active(..) => {}
+        _ => {
+            println!(" <- unexpected ipv6cp");
+            return Ok(());
+        }
     }
 
     match ipv6cp.data {
