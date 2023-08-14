@@ -287,7 +287,6 @@ fn recv_discovery(
 
                 println!(" <- [{}] padt, error: {}", pkt.src_mac, generic_error);
             }
-            PppoeData::Ignore => {}
             _ => println!(" <- [{}] unsupported pppoe pkt {:?}", pkt.src_mac, pkt),
         }
     }
