@@ -538,7 +538,7 @@ fn session(
                     }
                 }
                 Ppp::Terminate(ref reason, attempt) => {
-                    if attempt >= MAX_ATTEMPTS {
+                    if attempt >= MAX_STATUS_ATTEMPTS {
                         *ppp_state = Ppp::Terminate2(
                             String::from_utf8(reason.clone()).unwrap_or(String::new()),
                         );
