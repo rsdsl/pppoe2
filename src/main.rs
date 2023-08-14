@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use ppproperly::{
-    AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, IpcpData, IpcpOpt, IpcpPkt,
-    Ipv6cpData, Ipv6cpOpt, Ipv6cpPkt, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt, PppData,
-    PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize, IPCP, IPV6CP,
+    AuthProto, ChapAlgorithm, ChapData, ChapPkt, Deserialize, EtherType, IpcpData, IpcpOpt,
+    IpcpPkt, Ipv6cpData, Ipv6cpOpt, Ipv6cpPkt, LcpData, LcpOpt, LcpPkt, MacAddr, PapData, PapPkt,
+    PppData, PppPkt, PppoeData, PppoePkt, PppoeVal, Serialize, IPCP, IPV6CP,
 };
 use rsdsl_ip_config::{DsConfig, Ipv4Config, Ipv6Config};
 use rsdsl_netlinkd::link;
@@ -153,16 +153,31 @@ fn connect(interface: &str) -> Result<()> {
 
 fn recv_discovery(
     interface: &str,
-    sock: Socket,
+    mut sock: Socket,
     local_mac: MacAddr,
     state: Arc<Mutex<Pppoe>>,
 ) -> Result<()> {
     let mut sock_w = BufWriter::with_capacity(1500, sock.try_clone()?);
-    let mut sock_r = BufReader::with_capacity(1500, sock.try_clone()?);
 
     loop {
+        let mut buf = [0; 1522];
+        let n = sock.read(&mut buf)?;
+        let mut buf = &buf[..n];
+
+        let mut ether_type = EtherType::default();
+        match ether_type.deserialize(&mut &buf[12..14]) {
+            Ok(_) => {}
+            Err(e) => {
+                if let ppproperly::Error::InvalidEtherType(_) = e {
+                    continue;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+
         let mut pkt = PppoePkt::default();
-        pkt.deserialize(&mut sock_r)?;
+        pkt.deserialize(&mut buf)?;
 
         match *state.lock().expect("pppoe state mutex is poisoned") {
             Pppoe::Request(remote_mac, ..) => {

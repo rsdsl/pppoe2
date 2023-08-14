@@ -631,7 +631,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "ppproperly"
 version = "0.1.0"
-source = "git+https://github.com/rsdsl/ppproperly.git#76b1248413787f4e710ee32527b4f2161a21f46c"
+source = "git+https://github.com/rsdsl/ppproperly.git#ab2277d70070369d57ba4854af5f1c03b19f8ae3"
 dependencies = [
  "bitfield",
  "ppproperly_macros",
